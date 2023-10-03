@@ -1,0 +1,2078 @@
+---
+title: "Visulaize output DGE analysis - Raptor Level 3"
+output:
+  html_document:
+    df_print: paged
+    theme: flatly
+    number_sections: yes
+    toc: yes-
+    toc_float: yes
+    code_folding: hide
+params:
+    path: "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/"
+    prefix: !r c('KHOS', 'MG63', 'hMSC', 'U2OS')
+    comp: !r c('WTvsEZHIP')
+    reference: 'hg19.Ensembl'
+---
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning=FALSE)
+```
+
+Explore output from Raptor L3 (PCA + DEG ) for hMSC cells (WT vs EZHIP+).
+
+```{r, results = FALSE}
+library(ggplot2)
+library(tidyverse)
+library(rlist)
+library(patchwork)
+library(ggrepel)
+library(gplots)
+library(data.table)
+library(ComplexHeatmap)
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(DOSE)
+library(Seurat)
+library(ggpubr)
+library(ggrastr)
+```
+
+```{r}
+pca_plot = function(df, colors, info.smpl, title, lab = T, pca.cont, PC_1='PC1', PC_2='PC2', color_by = 'Group', shape = ''){
+  p = df %>%
+    t %>%
+    as.data.frame() %>%
+    dplyr::select(PC_1, PC_2) %>%
+    rownames_to_column("Nickname") %>%
+    left_join(info.smpl, by="Nickname") %>%
+    ggplot(aes(x=.data[[PC_1]], y=.data[[PC_2]], color = .data[[color_by]], shape = .data[[shape]])) +
+    geom_point(size = 3, alpha = 0.8) +
+    scale_color_manual(values = colors[[color_by]]) +
+    theme_bw() +
+    theme(text = element_text(size=13)) +
+    xlab(paste0(PC_1, ' ', (pca.cont %>% filter(PC == PC_1))$percentVariance, '%')) +
+    ylab(paste0(PC_2, ' ', (pca.cont %>% filter(PC == PC_2))$percentVariance, '%')) +
+    ggtitle(title) +
+    theme(text = element_text(size = 10),
+        panel.grid = element_blank(),
+        legend.title = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+        aspect.ratio = 0.9)
+
+  if(lab){
+    p = p +
+    geom_text_repel(aes(label = Nickname), 
+                    show.legend	= F, 
+                    box.padding = 0.5, 
+                    max.overlaps = Inf, 
+                    color="black", 
+                    size = 2) 
+  }
+  return(p)
+}
+
+```
+
+
+```{r}
+prep_vulcano_plot_data = function(df, pval=0.05, fc=1, bm=100){
+  df$diffexpressed = "NO"
+  df$diffexpressed[df$log2FoldChange > fc & df$padj < pval & df$baseMean > bm] = "UP"
+  df$diffexpressed[df$log2FoldChange < -fc & df$padj < pval & df$baseMean > bm] = "DOWN"
+  df$delabel = NA
+  df$delabel[df$diffexpressed != "NO"] = df$ID[df$diffexpressed != "NO"]
+  return(df)
+}
+
+vulcano_plot = function(df, log2fc = 1, label_top_n = 20, pval=0.05, color = 'red'){  
+
+  p = df %>%
+    prep_vulcano_plot_data %>% 
+    arrange(!is.na(delabel), delabel) %>%
+    mutate(lab = ifelse(delabel %in% (df %>% prep_vulcano_plot_data %>% filter(diffexpressed != 'NO') %>% group_by(diffexpressed) %>% top_n(padj, n = -label_top_n))$ID, delabel, NA)) %>%
+    separate(lab, c("ENS", "SYM"), sep = ":") %>%
+    mutate(SYM = ifelse(grepl("^MT-|^RP[1-9]|AS1$", SYM), NA, SYM)) %>%
+    ggplot(aes(x=log2FoldChange, y=-log10(padj), col=diffexpressed, label=SYM)) +
+    geom_point(size=2, alpha=0.7) +
+    scale_color_manual(values=c("#3B7080", "lightgrey", "#C84C09"),
+                       name="Change",
+                       labels=c("Down", "No Change", "Up")) +
+    geom_vline(xintercept=c(-log2fc, log2fc), col="red", linetype='dotted') +
+    geom_hline(yintercept=-log10(pval), col="red", linetype='dotted') +
+    geom_text_repel(show.legend	= F, box.padding = 0.5, max.overlaps = 20, color = '#2D434E') +
+    theme_bw() +
+    theme(text=element_text(size=13), legend.position = 'none') +
+    xlab("log2 Fold Change") +
+    ylab("-log10 Adjusted p-value") +
+    theme(text = element_text(size = 20),
+          panel.grid = element_blank(), 
+          panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+          aspect.ratio = 0.9)
+  
+  p = rasterize(p, layers='Point', dpi=500)
+  return(p)
+}
+
+
+volcano_plot_genesets = function(df, log2fc = 1, pval=0.05, geneset = 'ACTA2', color = 'red', lab = 'ACTA2'){  
+
+  p = df %>%
+    prep_vulcano_plot_data %>% 
+    separate(ID, into =  c("ENS", "SYM"), sep = ":", remove = F) %>%
+    mutate(lab = ifelse(SYM %in% lab, SYM, NA)) %>%
+    mutate(col = ifelse(SYM %in% geneset, 'yes', 'no')) %>%
+    arrange((col)) %>%
+    ggplot(aes(x=log2FoldChange, y=-log10(padj), col=col, label = lab)) +
+    geom_point(size=2, alpha=0.7) +
+    scale_color_manual(values=c('lightgrey', color)) +
+    geom_vline(xintercept=c(-log2fc, log2fc), col="red", linetype='dotted') +
+    geom_hline(yintercept=-log10(pval), col="red", linetype='dotted') +
+    geom_text_repel(show.legend	= F, box.padding = 2, max.overlaps = 50, color = 'black', size = 4) +
+    theme_bw() +
+    theme(text=element_text(size=13), legend.position = 'none') +
+    xlab("log2 Fold Change") +
+    ylab("-log10 Adjusted p-value") +
+    theme(text = element_text(size = 10),
+          panel.grid = element_blank(), 
+          panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+          aspect.ratio = 0.9)
+
+  return(p)
+}
+```
+
+
+```{r}
+run_ORA_msigdb = function(gene_list, pval=1, qval=1, cat, subcat=NA, background, minset = 10){
+
+  #TERM2GENE
+  term2gene = msigdbr(species = "human", category = cat, subcategory = subcat) %>%          
+                      dplyr::select(c("gs_name", "human_ensembl_gene")) %>%
+              mutate(gs_name = str_replace(gs_name, "^GOBP_", ""))
+
+  #TERM2NAME
+  term2name = msigdbr(species = "human", category = cat, subcategory = subcat) %>%          
+                      dplyr::select(c("gs_name", "gs_description")) %>%
+              mutate(gs_name = str_replace(gs_name, "^GOBP_", ""))
+
+  #run ora
+  ora = enricher(gene_list,
+             pvalueCutoff = pval,
+	     qvalueCutoff = qval,
+             pAdjustMethod = "BH",
+              minGSSize = minset,
+             universe = background,
+             TERM2GENE = term2gene)
+
+  ora=setReadable(ora,
+                  OrgDb = org.Hs.eg.db,
+                  keyType = "ENSEMBL")
+  return(ora)
+}
+
+n_deg = function(df, prefix){
+  df %>%
+  prep_vulcano_plot_data() %>%
+  dplyr::select(diffexpressed) %>%
+  dplyr::count(diffexpressed) %>%
+  filter(diffexpressed == "UP" | diffexpressed == "DOWN") %>%
+  mutate(group = prefix) %>%
+  return
+}
+
+boxplot.u2os = function(counts, gene, group_pal){
+df = counts[grepl(paste0(':', gene, '$'),rownames(counts)),] %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column('sample') %>%
+  separate(sample, into = c(NA, 'Clone', NA, NA)) %>%
+  mutate(Group = ifelse(Clone == 'C54', 'EZHIP KO', 'EZHIP'), 
+         Group = factor(Group, levels = c('EZHIP KO', 'EZHIP')))
+names(df)[2] = 'gene'
+
+p = df %>% 
+  ggplot(aes(x = Group, y = gene, fill = Group, color = Group)) +
+  geom_boxplot(size = 0.7, alpha = 0.5) +
+  scale_fill_manual(values = group_pal) +
+  scale_color_manual(values = group_pal) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank(), 
+        axis.title.x = element_blank(), 
+        aspect.ratio=1, 
+        legend.position = 'none') +
+  ggtitle(gene) +
+  ylab('normalized counts')
+
+return(p)
+}
+
+boxplot.hmsc = function(counts, gene, group_pal){
+df = counts[grepl(paste0(':', gene, '$'),rownames(counts)),] %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column('sample') %>%
+  separate(sample, into = c(NA, 'Group', NA)) %>%
+  mutate(Group = factor(Group, levels = c('WT', 'EZHIP')))
+names(df)[2] = 'gene'
+
+p = df %>% 
+  ggplot(aes(x = Group, y = gene, fill = Group, color = Group)) +
+  geom_boxplot(size = 0.7, alpha = 0.5) +
+  scale_fill_manual(values = group_pal) +
+  scale_color_manual(values = group_pal) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank(), 
+        axis.title.x = element_blank(), 
+        aspect.ratio=1, 
+        legend.position = 'none') +
+  ggtitle(gene) +
+  ylab('normalized counts')
+
+return(p)
+}
+
+
+boxplot.u2os.mg63 = function(counts, gene, group_pal){
+df = counts[grepl(paste0(':', gene, '$'),rownames(counts)),] %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column('sample') %>%
+  separate(sample, into = c('Cell_Line', 'Clone', NA, NA)) %>%
+  mutate(Group = ifelse(Clone == 'C54', 'EZHIP KO', 'EZHIP'),
+         Group = ifelse(Clone == 'WT', 'WT', Group),
+         Group = factor(Group, levels = c('EZHIP KO', 'WT', 'EZHIP')))
+names(df)[3] = 'gene'
+
+p = df %>% 
+  ggplot(aes(x = Cell_Line, y = gene, fill = Group, color = Group)) +
+  geom_boxplot(size = 0.7, alpha = 0.5) +
+  scale_fill_manual(values = group_pal) +
+  scale_color_manual(values = group_pal) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank(), 
+        axis.title.x = element_blank(), 
+        aspect.ratio=1, 
+        legend.position = 'none') +
+  ggtitle(gene) +
+  ylab('normalized counts')
+
+return(p)
+}
+
+```
+
+# DATA
+
+```{r}
+# pqth to raptor output
+PATH = params$path
+
+# comparison for DEG  
+COMP = params$comp
+
+# prefix for naming files etc
+PREFIX = params$prefix
+```
+
+```{r}
+deg.hmsc = read.csv(paste(PATH, PREFIX[3], "/out/01_raptor_exprtools/EZHIP/diff/Ensembl.ensGene.exon/", COMP, ".tsv", sep=""), sep="\t")
+deg.u2os = read.csv(paste(PATH, PREFIX[4], "/out/01_raptor_exprtools/EZHIP_minus_C77_C2/diff/Ensembl.ensGene.exon/EZHIP_KOvsEZHIP.tsv", sep=""), sep="\t")
+deg.khos = read.csv(paste0(PATH, "xgrafts/out/01_raptor_exprtools/", PREFIX[1], "/diff/", params$reference, ".ensGene.exon/", COMP, ".tsv"), sep="\t")
+deg.mg63 = read.csv(paste0(PATH, "xgrafts/out/01_raptor_exprtools/", PREFIX[2], "/diff/", params$reference, ".ensGene.exon/", COMP, ".tsv"), sep="\t")
+
+deg.khos.cult = read.csv(paste(PATH, PREFIX[1], "/out/01_raptor_exprtools/EZHIP/diff/Ensembl.ensGene.exon/", COMP, ".tsv", sep=""), sep="\t")
+deg.mg63.cult = read.csv(paste(PATH, PREFIX[2], "/out/01_raptor_exprtools/EZHIP/diff/Ensembl.ensGene.exon/", COMP, ".tsv", sep=""), sep="\t")
+```
+
+```{r}
+counts.hmsc = read.csv(paste(PATH, PREFIX[3], "/out/01_raptor_exprtools/EZHIP/counts/Ensembl.ensGene.exon.norm.tsv.gz", sep=""), sep="\t")
+counts.u2os = read.csv(paste(PATH, PREFIX[4], "/out/01_raptor_exprtools/EZHIP_minus_C77_C2/counts/Ensembl.ensGene.exon.norm.tsv.gz", sep=""), sep="\t")
+
+counts.khos.x = read.csv(paste0(PATH, "xgrafts/out/01_raptor_exprtools/", PREFIX[1], "/counts/hg19.Ensembl.ensGene.exon.norm.tsv.gz"), sep="\t")
+counts.mg63.x = read.csv(paste0(PATH, "xgrafts/out/01_raptor_exprtools/", PREFIX[2], "/counts/hg19.Ensembl.ensGene.exon.norm.tsv.gz"), sep="\t")
+
+counts.khos.cult = read.csv(paste(PATH, PREFIX[1], "/out/01_raptor_exprtools/EZHIP/counts/Ensembl.ensGene.exon.norm.tsv.gz", sep=""), sep="\t")
+counts.mg63.cult = read.csv(paste(PATH, PREFIX[2], "/out/01_raptor_exprtools/EZHIP/counts/Ensembl.ensGene.exon.norm.tsv.gz", sep=""), sep="\t")
+```
+
+```{r}
+atlas_path = '/lustre06/project/6004736/alvann/from_narval/REFERENCES/Bone_Marrow_Baccin/out/01_cluster_markers/bone_atlas_baccin_gene_sets.n100.Rda'
+load(atlas_path)
+
+atlas_path = '/lustre06/project/6004736/alvann/from_narval/REFERENCES/Skeletal_Muscle_Tissue_hg/out/02_gene_sets/skeletal_muscle_atlas_gene_sets.n100.Rda'
+load(atlas_path)
+
+atlas_path = '/lustre06/project/6004736/alvann/from_narval/REFERENCES/Skeletal_Development_Baryawno_mm/out/01_gene_sets/develop_bone_atlas_gene_sets.n100.Rda'
+load(atlas_path)
+
+atlas_path = '/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/cell_lines/out/gene_sets/cell_line_genesets.n100.Rda'
+load(atlas_path)
+```
+
+# DEG
+
+### Number of DE Genes
+
+```{r}
+ rbind(n_deg(deg.hmsc, 'hMSC'), 
+      n_deg(deg.khos.cult, 'KHOS cell line'), 
+      n_deg(deg.mg63.cult, 'MG63 cell line'), 
+      n_deg(deg.khos, 'KHOS xgraft'), 
+      n_deg(deg.mg63, 'MG63 xgraft'), 
+      n_deg(deg.u2os, 'U2OS')) %>%
+  data.table::fwrite(paste0(PATH,  'N_DEG.txt'))
+```
+
+
+```{r}
+pval=0.05
+
+p2 = rbind(n_deg(deg.hmsc, 'hMSC'), 
+      n_deg(deg.khos.cult, 'KHOS'), 
+      n_deg(deg.mg63.cult, 'MG63'), 
+      n_deg(deg.u2os, 'U2OS')) %>%
+  mutate(diffexpressed = factor(diffexpressed, levels = c('UP', 'DOWN'))) %>%
+  ggplot(aes(x=group, y=n, fill = diffexpressed)) +
+  geom_bar(stat = 'identity', position=position_dodge(width = 0.8), width=0.8) +
+  scale_fill_manual(values = c("#F46036", "#28666E"), name="", labels=c("Up", "Down")) +
+  geom_text(aes(label=n), 
+            width = 0.8, 
+            vjust=-.5, 
+            color="black",
+            position=position_dodge(width=0.9), 
+            size = 7) +
+  scale_y_continuous(expand = c(0,0)) +
+  coord_cartesian(ylim=c(0, 1610)) +
+  theme_bw() +
+  theme(axis.title = element_blank(),
+        text = element_text(size = 25),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank())
+
+p2
+```
+
+```{r}
+pdf(paste0(PATH,  'N_DEG.cell_lines.pdf'), width = 7, height = 5)
+p2
+dev.off()
+```
+```{r}
+pval=0.05
+
+p2 = rbind(n_deg(deg.khos, 'KHOS'), 
+      n_deg(deg.mg63, 'MG63')) %>%
+  mutate(diffexpressed = factor(diffexpressed, levels = c('UP', 'DOWN'))) %>%
+  ggplot(aes(x=group, y=n, fill = diffexpressed)) +
+  geom_bar(stat = 'identity', position=position_dodge(width = 0.8), width=0.8) +
+  scale_fill_manual(values = c("#F46036", "#28666E"), name="", labels=c("Up", "Down")) +
+  geom_text(aes(label=n), 
+            width = 0.8, 
+            vjust=-.5, 
+            color="black",
+            position=position_dodge(width=0.9), 
+            size = 7) +
+  scale_y_continuous(expand = c(0,0)) +
+  coord_cartesian(ylim=c(0, 1010)) +
+  theme_bw() +
+  theme(axis.title = element_blank(),
+        text = element_text(size = 25),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank())
+
+p2
+```
+
+```{r}
+pdf(paste0(PATH,  'N_DEG.xgraft.pdf'), width = 5, height = 5)
+p2
+dev.off()
+```
+```{r}
+pval=0.05
+
+p2 = rbind(n_deg(deg.hmsc, 'hMSC'), 
+      n_deg(deg.khos.cult, 'KHOS'), 
+      n_deg(deg.mg63.cult, 'MG63'), 
+      n_deg(deg.u2os, 'U2OS')) %>%
+  mutate(diffexpressed = factor(diffexpressed, levels = c('UP', 'DOWN'))) %>%
+  ggplot(aes(x=group, y=n, fill = diffexpressed)) +
+  geom_bar(stat = 'identity', position=position_dodge(width = 0.8), width=0.8) +
+  scale_fill_manual(values = c("#F46036", "#28666E"), name="", labels=c("Up", "Down")) +
+  geom_text(aes(label=n), 
+            width = 0.8, 
+            vjust=-.5, 
+            color="black",
+            position=position_dodge(width=0.9), 
+            size = 7) +
+  scale_y_continuous(expand = c(0,0)) +
+  coord_cartesian(ylim=c(0, 1610)) +
+  theme_bw() +
+  theme(axis.title = element_blank(),
+        text = element_text(size = 25),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank())
+
+p2
+```
+
+```{r}
+pdf(paste0(PATH,  'N_DEG.all.pdf'), width = 7, height = 5)
+p2
+dev.off()
+```
+
+
+# Vulcano Plots
+
+## hMSC 
+
+```{r}
+genes = (deg.hmsc %>% 
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(skeletal_muscle_atlas$hg_ens[['ACTA2+ MYH11+ MYL9+ Smooth muscle cells']], bone_atlas_baccin$hg_ens[['Smooth muscle']])) %>% 
+           filter(baseMean > 100 & padj < 0.05) %>%
+           slice_max(log2FoldChange, n = 30))$SYM
+
+p = deg.hmsc %>% filter(baseMean > 100) %>% volcano_plot_genesets(., geneset = genes, lab = genes)
+
+p = deg.hmsc %>% filter(baseMean > 100) %>% vulcano_plot(., label_top_n = 7) + coord_cartesian(xlim = c(-5, 5))
+p
+
+pdf(paste0(PATH, 'figures/volcano/', PREFIX[3], '_', COMP, '_volcano.pdf'), width = 5, height = 4)
+p
+dev.off()
+```
+
+
+```{r}
+n = 75
+genes = (deg.hmsc %>% 
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% skeletal_muscle_atlas$hg_ens[['ACTA2+ MYH11+ MYL9+ Smooth muscle cells']]) %>% 
+           slice_max(log2FoldChange, n = n))$SYM
+p3 = deg.hmsc %>% 
+  filter(baseMean > 100) %>% 
+  volcano_plot_genesets(., geneset = genes, color = '#D65108', lab = c('KCNE4', 'ATF3')) + 
+  theme(plot.title = element_text(hjust = 0.5, size = 7)) + 
+  coord_cartesian(xlim = c(-5, 5))  + 
+  ggtitle('ACTA2+ MYH11+ MYL9+ Smooth muscle cells')
+p3
+
+genes = genes = (deg.hmsc %>% 
+                   separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+                   filter(ENS %in% bone_atlas_baccin$hg_ens[['Osteoblasts']]) %>% 
+                   slice_max(log2FoldChange, n = n))$SYM
+p4 = deg.hmsc %>% 
+  filter(baseMean > 100) %>% 
+  volcano_plot_genesets(., geneset = genes, color = '#00A878') + 
+  theme(plot.title = element_text(hjust = 0.5, size = 7)) + 
+  coord_cartesian(xlim = c(-5, 5))  + 
+  ggtitle('Osteoblasts')
+
+genes = (deg.hmsc %>% 
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% bone_atlas_baccin$hg_ens[['Smooth muscle']]) %>% 
+           slice_max(order_by = log2FoldChange, n = n))$SYM
+
+p2 = deg.hmsc %>% 
+  filter(baseMean > 100) %>% 
+  volcano_plot_genesets(., geneset = genes, color = '#EFA00B', lab = c('ATF3', 'FOSB', 'HES1', 'NR4A1')) + 
+  theme(plot.title = element_text(hjust = 0.5, , size = 7)) + 
+  coord_cartesian(xlim = c(-5, 5)) + 
+  ggtitle('Smooth muscle')
+
+cowplot::plot_grid(p3, p2, p4, nrow = 1)
+
+pdf(paste0(PATH, 'figures/volcano/', PREFIX[3], '_', COMP, '_volcano_genesets.pdf'), width = 10, height = 4)
+cowplot::plot_grid(p3, p2, p4, nrow = 1)
+dev.off()
+```
+
+```{r}
+genes = (deg.hmsc %>% 
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(skeletal_muscle_atlas$hg_ens[['ACTA2+ MYH11+ MYL9+ Smooth muscle cells']], bone_atlas_baccin$hg_ens[['Smooth muscle']])) %>% 
+           filter(baseMean > 100 & padj < 0.05) %>%
+           slice_max(log2FoldChange, n = 30))$SYM
+
+mat = counts.hmsc %>%
+  rownames_to_column('ID') %>%
+  separate(ID, into = c('ENS', 'SYM'), sep = ':') %>%
+  filter(SYM %in% genes) %>%
+  select(-ENS) %>%
+  column_to_rownames('SYM') %>%
+  t() 
+
+mat = t(scale(mat))
+
+col_fun = circlize::colorRamp2(c(range(mat)[1], 0, range(mat)[2]), c("#235789", "#F2EFC7", "#BC412B")) 
+
+ha = columnAnnotation(cond = c('EZHIP','EZHIP','EZHIP', 'WT', 'WT', 'WT'), col = list(cond = c('EZHIP' = 'red', 'WT' = 'blue')))
+
+h = Heatmap(mat,
+        name = 'RNA', 
+        bottom_annotation = ha, 
+        col = col_fun, 
+        width = ncol(mat)*unit(4, "mm"),
+        height = nrow(mat)*unit(3.5, "mm"),
+        rect_gp = gpar(color = 'black'), 
+        show_row_dend = F, show_column_names = F)
+
+draw(h, heatmap_legend_side = "left", annotation_legend_side = 'left')
+
+pdf(paste0(PATH, 'figures/ssGSEA/hMSC.smoothmuscle.heatmap.pdf'), height = 10)
+draw(h, heatmap_legend_side = "left", annotation_legend_side = 'left')
+dev.off()
+```
+
+```{r}
+pdf(paste0(PATH, 'figures/volcano/', PREFIX[3], '_', COMP, '_volcano.pdf'), width = 5, height = 4)
+p
+dev.off()
+```
+
+```{r}
+c('Osteo-CAR', 'Adipo-CAR', 'Chondrocytes', 'Fibro/Chondro p.', 'Myofibroblasts', 'Ng2+ MSCs', 'Osteoblasts', 'Smooth muscle', 'Stromal fibro.', 'Endosteal fibro.', 'Arteriolar fibro.')
+```
+
+
+```{r}
+bm = 50
+genes = rbind(deg.hmsc %>% 
+           filter(baseMean > bm) %>%
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Smooth muscle']])) %>% 
+           mutate(set = 'Smooth muscle (Baccin)'),
+           deg.hmsc %>% 
+           filter(baseMean > bm) %>%
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(skeletal_muscle_atlas$hg_ens[['ACTA2+ MYH11+ MYL9+ Smooth muscle cells']])) %>% 
+           mutate(set = 'Smooth muscle (DiMicheli)'),
+           deg.hmsc %>% 
+           filter(baseMean > bm) %>%
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Osteoblasts']])) %>% 
+           mutate(set = 'Osteoblasts (Baccin)'),
+           deg.hmsc %>% 
+           filter(baseMean > bm) %>%
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(skeletal_muscle_atlas$hg_ens[['PAX7low MYF5+ MuSCs and progenitors']])) %>% 
+           mutate(set = 'MuSCs 2 (DiMicheli)'))
+
+my_comparisons = list(c('Smooth muscle (Baccin)', 'Osteoblasts (Baccin)'), 
+                      c('Smooth muscle (DiMicheli)', 'Osteoblasts (Baccin)'),
+                      c('Smooth muscle (Baccin)', 'MuSCs 2 (DiMicheli)'), 
+                      c('Smooth muscle (DiMicheli)', 'MuSCs 2 (DiMicheli)'))
+
+p = genes %>%
+  mutate(set = factor(set, levels = c('Smooth muscle (DiMicheli)', 'Smooth muscle (Baccin)', 'Osteoblasts (Baccin)', 'MuSCs 2 (DiMicheli)'))) %>%
+  ggplot(aes(set, log2FoldChange, fill = set)) +
+  geom_violin(alpha = 0.8) +
+  scale_fill_manual(values = c('#D65108', '#EFA00B',  '#00A878', '#426B69')) +
+  geom_hline(yintercept = 0, linetype =  'dotted', color = 'red') +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+          panel.grid = element_blank(), 
+          panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+          aspect.ratio = 1.5, 
+          axis.text.x = element_blank(), 
+          axis.title.x = element_blank(),
+          axis.ticks.x = element_blank()) +
+  stat_summary(fun = "median", geom = "crossbar", colour = "black", width = 0.2) +
+  stat_compare_means(method = "t.test", comparisons = my_comparisons, label = "p.signif")
+
+p
+
+pdf(paste0(PATH, 'figures/ssGSEA/', PREFIX[3], '_', COMP, '.genesets.violin.pdf'), width = 6, height = 4)
+p
+dev.off()
+
+p = genes %>%
+  mutate(set = factor(set, levels = c('Smooth muscle (DiMicheli)', 'Smooth muscle (Baccin)', 'Osteoblasts (Baccin)'))) %>%
+  ggplot(aes(set, log2FoldChange, fill = set)) +
+  geom_boxplot(alpha = 0.8) +
+  scale_fill_manual(values = c('#D65108', '#EFA00B',  '#00A878')) +
+  geom_hline(yintercept = 0, linetype =  'dotted', color = 'red') +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+          panel.grid = element_blank(), 
+          panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+          aspect.ratio = 1.5, 
+          axis.text.x = element_blank(), 
+          axis.title.x = element_blank(),
+          axis.ticks.x = element_blank()) +
+  stat_compare_means(method = "t.test", comparisons = my_comparisons, label = "p.signif")
+
+p
+pdf(paste0(PATH, 'figures/ssGSEA/', PREFIX[3], '_', COMP, '.genesets.boxplot.pdf'), width = 6, height = 4)
+p
+dev.off()
+```
+
+## U2OS 
+
+```{r}
+p = deg.u2os %>% filter(baseMean > 100) %>% vulcano_plot(., label_top_n = 5) + coord_cartesian(xlim = c(-15, 15))
+p
+```
+
+```{r}
+pdf(paste0(PATH, 'figures/volcano/', PREFIX[4], '_', COMP, '_volcano.pdf'), width = 5, height = 4)
+p
+dev.off()
+```
+
+
+```{r}
+n = 75
+genes = (deg.u2os %>% 
+        separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+                   filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Osteo-CAR']])) %>% 
+                   slice_max(log2FoldChange, n = n))$SYM
+p2 = deg.u2os %>% 
+  filter(baseMean > 100 | (baseMean < 100 & grepl('CXCL12', ID))) %>% 
+  volcano_plot_genesets(., geneset = genes, color = '#00A878', lab = c("CXCL14", "CXCL12",  "WIF1", "DLX5",'ALPL')) + 
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  coord_cartesian(xlim = c(-15, 15))  + 
+  ggtitle('U2OS Culture - Osteo CAR')
+
+p2
+```
+
+```{r}
+pdf(paste0(PATH, 'figures/volcano/', PREFIX[4], '_', COMP, '_volcano.pdf'), width = 5, height = 4)
+p2
+dev.off()
+```
+
+```{r}
+deg.u2os %>% 
+    separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+            filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Osteo-CAR']]))
+```
+
+
+## KHOS 
+
+```{r}
+p = deg.khos.cult %>% filter(baseMean > 100) %>% vulcano_plot(., label_top_n = 5) + coord_cartesian(xlim = c(-12, 12))
+p
+```
+
+```{r}
+pdf(paste0(PATH, 'figures/volcano/', PREFIX[1], '_cell_line_', COMP, '_volcano.pdf'), width = 5, height = 4)
+p
+dev.off()
+```
+
+```{r}
+n = 75
+genes = (deg.khos.cult %>% 
+                   separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+                   filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Osteo-CAR']])) %>% 
+                   slice_max(log2FoldChange, n = n))$SYM
+p1 = deg.khos.cult %>% 
+  filter(baseMean > 100) %>% 
+  volcano_plot_genesets(., geneset = genes, color = '#00A878', lab = c("")) + 
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  coord_cartesian(xlim = c(-15, 15))  + 
+  ggtitle('KHOS Culture - Osteo CAR')
+
+p1
+```
+
+```{r}
+pdf(paste0(PATH, 'figures/volcano/', PREFIX[1], '_cell_line_', COMP, 'Osteo-CAR_volcano.pdf'), width = 5, height = 4)
+p1
+dev.off()
+```
+
+```{r}
+p = deg.khos %>% filter(baseMean > 100) %>% vulcano_plot(., label_top_n = 5) + coord_cartesian(xlim = c(-15, 15))
+p
+```
+
+```{r}
+pdf(paste0(PATH, 'figures/volcano/',PREFIX[1], '_', COMP, '_volcano.pdf'), width = 5, height = 4)
+p
+dev.off()
+```
+
+```{r}
+n = 75
+genes = (deg.khos %>% 
+                   separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+                   filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Osteo-CAR']])) %>% 
+                   slice_max(log2FoldChange, n = n))$SYM
+p1 = deg.khos %>% 
+  filter(baseMean > 100) %>% 
+  volcano_plot_genesets(., geneset = genes, color = '#00A878', lab = c("")) + 
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  coord_cartesian(xlim = c(-15, 15))  + 
+  ggtitle('KHOS Xenograft - Osteo CAR')
+
+p1
+```
+```{r}
+pdf(paste0(PATH, 'figures/volcano/', PREFIX[1], '_', COMP, 'Osteo-CAR_volcano.pdf'), width = 5, height = 4)
+p1
+dev.off()
+```
+
+
+## MG63 
+
+```{r}
+p = deg.mg63 %>% filter(baseMean > 100) %>% vulcano_plot(., label_top_n = 5) + coord_cartesian(xlim = c(-15, 15))
+p
+```
+
+```{r}
+pdf(paste0(PATH, 'figures/volcano/', PREFIX[2], '_', COMP, '_volcano.pdf'), width = 5, height = 4)
+p
+dev.off()
+```
+
+```{r}
+bm = 100
+set = 'Osteoblasts'
+genes = rbind(deg.mg63 %>% 
+                filter(baseMean > 100) %>%
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[[set]])) %>% 
+           mutate(set = set, 
+                  cell = 'MG63 Xeno'),
+           deg.mg63.cult %>% 
+              filter(baseMean > 100) %>%
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[[set]])) %>% 
+           mutate(set = set,
+                  cell = 'MG63 CL'),
+           deg.u2os %>% 
+              filter(baseMean > 100) %>%
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[[set]])) %>% 
+           mutate(set = set,
+                  cell = 'U2OS CL',
+                  log2FoldChange = log2FoldChange))
+
+p1 = genes %>%
+  ggplot(aes(cell, log2FoldChange, fill = cell)) +
+  geom_violin(alpha = 0.8) +
+  scale_fill_manual(values = c('#791616', '#EFA00B',  '#D65108')) +
+  geom_hline(yintercept = 0, linetype =  'dotted', color = 'red') +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+          panel.grid = element_blank(), 
+          panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+          aspect.ratio = 1.5, 
+          legend.position = 'none',
+        axis.title.x = element_blank()) +
+  stat_summary(fun = "median", geom = "crossbar", colour = "black", width = 0.2)+
+  ggtitle(set)
+
+set = 'Osteo-CAR'
+genes = rbind(deg.mg63 %>% 
+                filter(baseMean > 100) %>%
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[[set]])) %>% 
+           mutate(set = set, 
+                  cell = 'MG63 Xeno'),
+           deg.mg63.cult %>% 
+             filter(baseMean > 100) %>%
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[[set]])) %>% 
+           mutate(set = set,
+                  cell = 'MG63 CL'),
+           deg.u2os %>% 
+             filter(baseMean > 100) %>%
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[[set]])) %>% 
+           mutate(set = set,
+                  cell = 'U2OS CL',
+                  log2FoldChange = log2FoldChange))
+
+p2 = genes %>%
+  ggplot(aes(cell, log2FoldChange, fill = cell)) +
+  geom_violin(alpha = 0.8) +
+  scale_fill_manual(values = c('#791616', '#EFA00B',  '#D65108')) +
+  geom_hline(yintercept = 0, linetype =  'dotted', color = 'red') +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+          panel.grid = element_blank(), 
+          panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+          aspect.ratio = 1.5, 
+          legend.position = 'none',
+        axis.title.x = element_blank()) +
+  stat_summary(fun = "median", geom = "crossbar", colour = "black", width = 0.2) +
+  ggtitle(set)
+
+p2 + p1
+
+pdf(paste0(PATH, 'figures/ssGSEA/MG63_U2OS_', COMP, '.genesets.violin.pdf'), width = 6, height = 4)
+p2 + p1
+dev.off()
+
+```
+
+```{r}
+bm = 100
+deg = deg.mg63.cult
+genes = rbind(deg %>% 
+            filter(baseMean > bm) %>%    
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Osteo-CAR']])) %>% 
+           mutate(set = 'Osteo-CAR'),
+           deg %>% 
+            filter(baseMean > bm) %>%  
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Adipo-CAR']])) %>% 
+           mutate(set = 'Adipo-CAR'),
+           deg %>% 
+            filter(baseMean > bm) %>%  
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Myofibroblasts']])) %>% 
+           mutate(set = 'Myofibroblasts')) 
+
+p = genes %>%
+  mutate(set = factor(set, levels = c('Osteo-CAR', 'Adipo-CAR', 'Myofibroblasts'))) %>%
+  ggplot(aes(set, log2FoldChange, fill = set)) +
+  geom_violin(alpha = 0.8) +
+  scale_fill_manual(values = c('#D65108', '#EFA00B',  '#00A878', '#426B69')) +
+  geom_hline(yintercept = 0, linetype =  'dotted', color = 'red') +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+          panel.grid = element_blank(), 
+          panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+          aspect.ratio = 1.5, 
+        axis.title.x = element_blank(), 
+        axis.text.x = element_blank(), 
+        axis.ticks.x = element_blank()) +
+  stat_summary(fun = "median", geom = "crossbar", colour = "black", width = 0.2) +
+    stat_compare_means(method = "t.test", comparisons = list(c('Osteo-CAR', 'Myofibroblasts'), c('Adipo-CAR', 'Myofibroblasts')), label = "p.signif")
+
+p
+pdf(paste0(PATH, 'figures/ssGSEA/MG63_', COMP, '.genesets.violin.pdf'), width = 6, height = 4)
+p
+dev.off()
+```
+
+```{r}
+n = 75
+genes = (deg.mg63 %>% 
+                   separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+                   filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Osteo-CAR']])) %>% 
+                   slice_max(log2FoldChange, n = n))$SYM
+p1 = deg.mg63 %>% 
+  filter(baseMean > 100) %>% 
+  volcano_plot_genesets(., geneset = genes, color = '#00A878', lab = c("CXCL14", "CXCL12", "WIF1", "DLX5", 'ALPL')) + 
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  coord_cartesian(xlim = c(-15, 15))  + 
+  ggtitle('MG63 Xenograft - Osteo CAR')
+
+p1
+```
+
+```{r}
+pdf(paste0(PATH, 'figures/volcano/', PREFIX[2], '_', COMP, 'Osteo-CAR_Adipo-CAR_volcano.pdf'), width = 5, height = 4)
+p1
+dev.off()
+```
+
+```{r}
+p = deg.mg63.cult %>% filter(baseMean > 100) %>% vulcano_plot(., label_top_n = 3) + coord_cartesian(xlim = c(-15, 15))
+p
+```
+
+```{r}
+pdf(paste0(PATH, 'figures/volcano/', PREFIX[2], '_cell_line_', COMP, '_volcano.pdf'), width = 5, height = 4)
+p
+dev.off()
+```
+
+
+```{r}
+n = 75
+genes = (deg.mg63.cult %>% 
+                   separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+                   filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Osteo-CAR']])) %>% 
+                   slice_max(log2FoldChange, n = n))$SYM
+p1 = deg.mg63.cult %>% 
+  filter(baseMean > 100) %>% 
+  volcano_plot_genesets(., geneset = genes, color = '#00A878', lab = c("CXCL14", "CXCL12", "ALPL", "DLX5", 'WIF1')) + 
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  coord_cartesian(xlim = c(-10, 10))  + 
+  ggtitle('MG63 Culture - Osteo CAR')
+
+p1
+```
+
+```{r}
+pdf(paste0(PATH, 'figures/volcano/', PREFIX[2], '_cell_line_', COMP, 'Osteo-CAR_volcano.pdf'), width = 5, height = 4)
+p1
+dev.off()
+```
+
+```{r}
+genes.1 = (deg.mg63 %>% 
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Osteo-CAR']], bone_atlas_baccin$hg_ens[['Adipo-CAR']])) %>% 
+           filter(log2FoldChange > 0 & padj < 0.05) %>%
+           slice_max(log2FoldChange, n = 20))$SYM
+
+genes.2 = (deg.khos %>% 
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Osteo-CAR']], bone_atlas_baccin$hg_ens[['Adipo-CAR']])) %>% 
+           filter(log2FoldChange > 0 & padj < 0.05) %>%
+           slice_max(log2FoldChange, n = 15))$SYM
+
+genes = intersect(genes.1, genes.2)
+
+mat1 = counts.khos.x %>%
+  rownames_to_column('ID') %>%
+  separate(ID, into = c('ENS', 'SYM'), sep = ':') %>%
+  filter(SYM %in% genes.2) %>%
+  select(-ENS) %>%
+  column_to_rownames('SYM') %>%
+  t() 
+
+mat1 = t(scale(mat1))
+mat1 = na.omit(mat1)
+
+col_fun = circlize::colorRamp2(c(range(mat1)[1], 0, range(mat1)[2]), c("#235789", "#F2EFC7", "#BC412B")) 
+
+ha = columnAnnotation(cond = c('EZHIP','EZHIP','EZHIP', 'EZHIP KO','EZHIP KO','EZHIP KO'), col = list(cond = c('EZHIP' = 'red', 'EZHIP KO' = 'blue')))
+
+h1 = Heatmap(mat1,
+        name = 'RNA', 
+        bottom_annotation = ha, 
+        col = col_fun, 
+        width = ncol(mat1)*unit(4, "mm"),
+        height = nrow(mat1)*unit(3.5, "mm"),
+        rect_gp = gpar(color = 'black'), 
+        show_row_dend = F, show_column_names = F)
+
+draw(h1, heatmap_legend_side = "left", annotation_legend_side = 'left')
+
+mat2 = counts.mg63.x %>%
+  rownames_to_column('ID') %>%
+  separate(ID, into = c('ENS', 'SYM'), sep = ':') %>%
+  filter(SYM %in% genes.1) %>%
+  select(-ENS) %>%
+  column_to_rownames('SYM') %>%
+  t() 
+
+mat2 = t(scale(mat2))
+mat2 = na.omit(mat2)
+
+col_fun = circlize::colorRamp2(c(range(mat2)[1], 0, range(mat2)[2]), c("#235789", "#F2EFC7", "#BC412B")) 
+
+ha = columnAnnotation(cond = c('EZHIP','EZHIP','EZHIP', 'WT','WT'), col = list(cond = c('EZHIP' = 'red', 'WT' = 'blue')))
+
+h2 = Heatmap(mat2,
+        name = 'RNA', 
+        bottom_annotation = ha, 
+        col = col_fun, 
+        width = ncol(mat2)*unit(4, "mm"),
+        height = nrow(mat2)*unit(3.5, "mm"),
+        rect_gp = gpar(color = 'black'), 
+        show_row_dend = F, show_column_names = F)
+
+draw(h2, heatmap_legend_side = "left", annotation_legend_side = 'left')
+
+mat3 = counts.mg63.cult %>%
+  rownames_to_column('ID') %>%
+  separate(ID, into = c('ENS', 'SYM'), sep = ':') %>%
+  filter(SYM %in% genes) %>%
+  select(-ENS) %>%
+  column_to_rownames('SYM') %>%
+  t() 
+
+mat3 = t(scale(mat3))
+mat3 = na.omit(mat3)
+
+col_fun = circlize::colorRamp2(c(range(mat3)[1], 0, range(mat3)[2]), c("#235789", "#F2EFC7", "#BC412B")) 
+
+ha = columnAnnotation(cond = c('EZHIP','EZHIP','EZHIP', 'WT','WT', 'WT'), col = list(cond = c('EZHIP' = 'red', 'WT' = 'blue')))
+
+h3 = Heatmap(mat3,
+        name = 'RNA', 
+        bottom_annotation = ha, 
+        col = col_fun, 
+        width = ncol(mat3)*unit(4, "mm"),
+        height = nrow(mat3)*unit(3.5, "mm"),
+        rect_gp = gpar(color = 'black'), 
+        show_row_dend = F, show_column_names = F)
+
+draw(h2, heatmap_legend_side = "left", annotation_legend_side = 'left')
+
+pdf(paste0(PATH, 'figures/ssGSEA/KHOS.osteo-adipo-car.heatmap.pdf'), height = 10)
+draw(h1, heatmap_legend_side = "left", annotation_legend_side = 'left')
+dev.off()
+```
+
+
+## Heatmaps
+
+```{r}
+counts.mg63u2os = data.table::fread(paste(PATH, "/cell_lines/out/01_raptor_exprtools/EZHIP_U2OS_MG63_xeno_cell/counts/Ensembl.ensGene.exon.norm.tsv.gz", sep=""), sep="\t") %>%
+  column_to_rownames('V1')
+```
+
+
+```{r}
+genes.1 = (deg.mg63 %>% 
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Osteo-CAR']], bone_atlas_baccin$hg_ens[['Adipo-CAR']])) %>% 
+           filter(baseMean > 0 & padj < 0.05 & log2FoldChange > 0) %>%
+           slice_max(log2FoldChange, n = 15))$SYM
+genes.2 = (deg.u2os %>% 
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Osteo-CAR']], bone_atlas_baccin$hg_ens[['Adipo-CAR']])) %>% 
+           filter(baseMean > 0 & padj < 0.05 & log2FoldChange > 0) %>%
+           slice_max(log2FoldChange, n = 15))$SYM
+genes.3 = (deg.mg63.cult %>% 
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Osteo-CAR']], bone_atlas_baccin$hg_ens[['Adipo-CAR']])) %>% 
+           filter(baseMean > 0 & padj < 0.05 & log2FoldChange > 0) %>%
+           slice_max(log2FoldChange, n = 15))$SYM
+
+genes = intersect(genes.1, genes.2)
+
+heatmap = function(counts, genes, cond){
+  mat = counts %>%
+  rownames_to_column('ID') %>%
+  separate(ID, into = c('ENS', 'SYM'), sep = ':') %>%
+  filter(SYM %in% genes) %>%
+  select(-ENS) %>%
+  column_to_rownames('SYM') %>%
+  t() 
+
+mat = t(scale(mat))
+mat[is.na(mat)] = 0
+
+col_fun = circlize::colorRamp2(c(range(mat)[1], 0, range(mat)[2]), c("#235789", "#F2EFC7", "#BC412B")) 
+
+ha = columnAnnotation(cond = cond, col = list(cond = c('EZHIP' = 'red', 'WT' = 'blue', 'EZHIP KO' = 'blue')))
+
+h = Heatmap(mat,
+        name = 'RNA', 
+        col = col_fun, 
+        width = ncol(mat)*unit(4, "mm"),
+        height = nrow(mat)*unit(4, "mm"),
+        rect_gp = gpar(color = 'black'), 
+        show_row_dend = F, 
+        show_column_names = F, 
+        bottom_annotation = ha)
+
+return(h)
+}
+
+pdf(paste0(PATH, 'figures/ssGSEA/hMSC.osteo-adipo-car.heatmap.pdf'), height = 10)
+
+draw(heatmap(counts.u2os, genes.2, c('EZHIP', 'EZHIP', 'EZHIP', 'EZHIP KO', 'EZHIP KO', 'EZHIP KO')), heatmap_legend_side = "left", annotation_legend_side = 'left')
+
+draw(heatmap(counts.mg63.x, genes.1, c('EZHIP', 'EZHIP', 'EZHIP', 'WT', 'WT')), heatmap_legend_side = "left", annotation_legend_side = 'left')
+
+draw(heatmap(counts.mg63.cult, genes.3, c('EZHIP', 'EZHIP', 'EZHIP', 'WT', 'WT', 'WT')), heatmap_legend_side = "left", annotation_legend_side = 'left')
+
+dev.off()
+```
+
+
+```{r}
+genes.1 = (deg.hmsc %>% 
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(bone_atlas_baccin$hg_ens[['Smooth muscle']])) %>% 
+           filter(baseMean > 0 & padj < 0.05 & log2FoldChange > 0) %>%
+           slice_max(log2FoldChange, n = 20))$SYM
+
+genes.2 = (deg.hmsc %>% 
+           separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+           filter(ENS %in% c(skeletal_muscle_atlas$hg_sym[["ACTA2+ MYH11+ MYL9+ Smooth muscle cells"]])) %>% 
+           filter(baseMean > 0 & padj < 0.05 & log2FoldChange > 0) %>%
+           slice_max(log2FoldChange, n = 20))$SYM
+
+
+heatmap = function(counts, genes, cond){
+  mat = counts %>%
+  rownames_to_column('ID') %>%
+  separate(ID, into = c('ENS', 'SYM'), sep = ':') %>%
+  filter(SYM %in% genes) %>%
+  select(-ENS) %>%
+  column_to_rownames('SYM') %>%
+  t() 
+
+mat = t(scale(mat))
+mat[is.na(mat)] = 0
+
+col_fun = circlize::colorRamp2(c(range(mat)[1], 0, range(mat)[2]), c("#235789", "#F2EFC7", "#BC412B")) 
+
+ha = columnAnnotation(cond = cond, col = list(cond = c('EZHIP' = 'red', 'WT' = 'blue', 'EZHIP KO' = 'blue')))
+
+h = Heatmap(mat,
+        name = 'RNA', 
+        col = col_fun, 
+        width = ncol(mat)*unit(4, "mm"),
+        height = nrow(mat)*unit(4, "mm"),
+        rect_gp = gpar(color = 'black'), 
+        show_row_dend = F, 
+        show_column_names = F, 
+        bottom_annotation = ha)
+
+return(h)
+}
+
+pdf(paste0(PATH, 'figures/ssGSEA/hMSC.osteocar.heatmap.pdf'), height = 10)
+
+draw(heatmap(counts.u2os, genes.2, c('EZHIP', 'EZHIP', 'EZHIP', 'EZHIP KO', 'EZHIP KO', 'EZHIP KO')), heatmap_legend_side = "left", annotation_legend_side = 'left')
+
+draw(heatmap(counts.mg63.x, genes.1, c('EZHIP', 'EZHIP', 'EZHIP', 'WT', 'WT')), heatmap_legend_side = "left", annotation_legend_side = 'left')
+
+draw(heatmap(counts.mg63.cult, genes.3, c('EZHIP', 'EZHIP', 'EZHIP', 'WT', 'WT', 'WT')), heatmap_legend_side = "left", annotation_legend_side = 'left')
+
+dev.off()
+```
+
+
+# PCA 
+
+## hMSC 
+
+```{r}
+# pqth to raptor output
+PATH_R = paste0(params$path, '/hMSC/out/01_raptor_exprtools/EZHIP/')
+
+# comparison for DEG  
+COMP = 'WTvsEZHIP'
+```
+
+```{r}
+pca.10000 = read.csv(paste0(PATH_R, "cluster/vst.Ensembl.ensGene.exon.complete.euclidean.10000.most.var/samplePCA.vst.Ensembl.ensGene.exon.10000.most.var.tsv"), sep="\t", check.names = F)
+
+pca.cont = data.table::fread(paste0(PATH_R, "cluster/vst.Ensembl.ensGene.exon.complete.euclidean.10000.most.var/samplePCA.vst.Ensembl.ensGene.exon.10000.most.var.PCcontribution.tsv")) %>%
+  mutate(across(where(is.numeric), round, 1))
+```
+
+```{r}
+info.samples = read.csv(paste(PATH_R, "info.samples.tsv", sep=""), sep="\t")
+info.groups = read.csv(paste(PATH_R, "info.groups.tsv", sep=""), sep="\t")
+info.samples = left_join(info.samples, info.groups, by="Group") %>%
+  mutate(cell = 'hMSC')
+
+info.samples
+```
+
+```{r}
+pca = pca_plot(pca.10000, info.smpl = info.samples, colors = list(Group = c('EZHIP' = 'red', 'WT' = 'blue')), color_by = 'Group', PC_1 = 'PC1', PC_2 = 'PC2', pca.cont = pca.cont, title = '', lab = F, shape = 'cell')
+pca
+
+pdf(paste0(PATH, 'figures/PCA/hMSC_RNA.PCA.pdf'), width = 3, height = 3)
+pca
+dev.off()
+```
+
+
+
+
+## Cancer cell culture 
+
+
+```{r}
+# pqth to raptor output
+PATH_R = paste0(params$path, '/cell_lines/out/01_raptor_exprtools/EZHIP_KHOS_MG63_xeno_cell/')
+
+# comparison for DEG  
+COMP = 'WTvsEZHIP'
+```
+
+```{r}
+pca.10000 = read.csv(paste0(PATH_R, "cluster/vst.Ensembl.ensGene.exon.complete.euclidean.10000.most.var/samplePCA.vst.Ensembl.ensGene.exon.10000.most.var.tsv"), sep="\t", check.names = F)
+
+pca.cont = data.table::fread(paste0(PATH_R, "cluster/vst.Ensembl.ensGene.exon.complete.euclidean.10000.most.var/samplePCA.vst.Ensembl.ensGene.exon.10000.most.var.PCcontribution.tsv")) %>%
+  mutate(across(where(is.numeric), round, 1))
+```
+
+```{r}
+info.samples = read.csv(paste(PATH_R, "info.samples.tsv", sep=""), sep="\t")
+info.groups = read.csv(paste(PATH_R, "info.groups.tsv", sep=""), sep="\t")
+info.samples = left_join(info.samples, info.groups, by="Group")
+
+info.samples
+```
+
+```{r}
+pca = pca_plot(pca.10000, info.smpl = info.samples, colors = list(Group = c('EZHIP' = 'red', 'WT' = 'blue')), color_by = 'Group', PC_1 = 'PC4', PC_2 = 'PC5', pca.cont = pca.cont, title = '', lab = F, shape = 'Cell_Line') 
+  #geom_hline(yintercept = 0, color = 'lightgrey', size = 0.5, linetype = 'dotted')   #geom_vline(xintercept = 0, color = 'lightgrey', size = 0.5, linetype = 'dotted')
+pca
+
+pdf(paste0(PATH, 'figures/PCA/U2OS_MG63_cell_xeno_RNA.PCA.pdf'), width = 4, height = 4)
+pca
+dev.off()
+```
+
+## Xenografts 
+
+```{r}
+# pqth to raptor output
+PATH_R = paste0(params$path, '/xgrafts/out/01_raptor_exprtools/both/')
+
+# comparison for DEG  
+COMP = 'WTvsEZHIP'
+```
+
+```{r}
+pca.10000 = read.csv(paste0(PATH_R, "cluster/vst.hg19.Ensembl.ensGene.exon.complete.euclidean.10000.most.var/samplePCA.vst.hg19.Ensembl.ensGene.exon.10000.most.var.tsv"), sep="\t", check.names = F)
+
+pca.cont = data.table::fread(paste0(PATH_R, "cluster/vst.hg19.Ensembl.ensGene.exon.complete.euclidean.10000.most.var/samplePCA.vst.hg19.Ensembl.ensGene.exon.10000.most.var.PCcontribution.tsv")) %>%
+  mutate(across(where(is.numeric), round, 1))
+```
+
+```{r}
+info.samples = read.csv(paste(PATH_R, "info.samples.tsv", sep=""), sep="\t")
+info.groups = read.csv(paste(PATH_R, "info.groups.tsv", sep=""), sep="\t")
+info.samples = left_join(info.samples, info.groups, by="Group")
+
+info.samples
+```
+
+```{r}
+pca = pca_plot(pca.10000, info.smpl = info.samples, colors = list(Group = c('EZHIP' = 'red', 'WT' = 'blue')), color_by = 'Group', PC_1 = 'PC1', PC_2 = 'PC2', pca.cont = pca.cont, title = '', lab = F, shape = 'Batch')
+pca
+
+pdf(paste0(PATH, 'figures/PCA/MG63_KHOS_xgrafts_RNA.PCA.pdf'), width = 4, height = 4)
+pca
+dev.off()
+```
+
+## Cancer cell culture 
+
+```{r}
+# pqth to raptor output
+PATH_R = paste0(params$path, '/cell_lines/out/01_raptor_exprtools/EZHIP_KHOS_xeno_cell/')
+
+# comparison for DEG  
+COMP = 'WTvsEZHIP'
+```
+
+```{r}
+pca.10000 = read.csv(paste0(PATH_R, "cluster/vst.Ensembl.ensGene.exon.complete.euclidean.10000.most.var/samplePCA.vst.Ensembl.ensGene.exon.10000.most.var.tsv"), sep="\t", check.names = F)
+
+pca.cont = data.table::fread(paste0(PATH_R, "cluster/vst.Ensembl.ensGene.exon.complete.euclidean.10000.most.var/samplePCA.vst.Ensembl.ensGene.exon.10000.most.var.PCcontribution.tsv")) %>%
+  mutate(across(where(is.numeric), round, 1))
+```
+
+```{r}
+info.samples = read.csv(paste(PATH_R, "info.samples.tsv", sep=""), sep="\t")
+info.groups = read.csv(paste(PATH_R, "info.groups.tsv", sep=""), sep="\t")
+info.samples = left_join(info.samples, info.groups, by="Group")
+
+info.samples
+```
+
+```{r}
+pca = pca_plot(pca.10000, info.smpl = info.samples, colors = list(Group = c('EZHIP' = 'red', 'WT' = 'blue')), color_by = 'Group', PC_1 = 'PC2', PC_2 = 'PC3', pca.cont = pca.cont, title = '', lab = F, shape = 'Cell_Line') 
+  #geom_hline(yintercept = 0, color = 'lightgrey', size = 0.5, linetype = 'dotted')   #geom_vline(xintercept = 0, color = 'lightgrey', size = 0.5, linetype = 'dotted')
+pca
+
+pdf(paste0(PATH, 'figures/PCA/KHOS_cell_xeno_RNA.PCA.pdf'), width = 4, height = 4)
+pca
+dev.off()
+```
+
+
+# Intersect 
+
+```{r}
+genes_up = list()
+genes_down = list()
+L2F=1
+PVA=0.05
+BM=0
+COLORS=c('#CD5334', '#568EA3', '#F6AE2D',  '#758E4F')
+PREFIX=c('MG63', 'KHOS')
+
+genes_up[[paste('KHOS')]] = (deg.khos %>% filter(log2FoldChange > L2F & padj < PVA & baseMean > BM))$ID
+genes_down[[paste('KHOS')]] = (deg.khos %>% filter(log2FoldChange < -L2F & padj < PVA & baseMean > BM))$ID
+
+genes_up[[paste('MG63')]] = (deg.mg63 %>% filter(log2FoldChange > L2F & padj < PVA & baseMean > BM))$ID
+genes_down[[paste('MG63')]] = (deg.mg63 %>% filter(log2FoldChange < -L2F & padj < PVA & baseMean > BM))$ID
+
+```
+
+## UP
+
+```{r fig.height=7, fig.width=15}
+v1 = ggvenn(genes_up, fill_alpha = 0.8,
+            show_percentage = F, 
+            fill_color = COLORS, 
+            stroke_color = NA, 
+            text_size = 8, 
+            set_name_size = 10) + ggtitle('Up Xgrafts')
+v1
+```
+
+```{r fig.height=7, fig.width=15}
+v2 = ggvenn(genes_down, 
+            show_percentage = F, 
+            fill_color = COLORS, 
+            stroke_color = NA, 
+            fill_alpha = 0.8,
+            text_size = 8, 
+            set_name_size = 10) + ggtitle('Down Xgrafts')
+v2
+```
+
+```{r}
+pdf(paste0("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/03_compare_DE_genes/figures/shared_xgrafts_", paste(PREFIX, collapse = '_'), ".up.venn.pdf"))
+v1
+dev.off()
+```
+
+```{r}
+pdf(paste0("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/03_compare_DE_genes/figures/shared_xgrafts_", paste(PREFIX, collapse = '_'), ".down.venn.pdf"))
+v2
+dev.off()
+```
+
+```{r}
+genes_up_intersect = Reduce(intersect, genes_up)
+```
+
+```{r}
+genes_ora_up = sapply(str_split(genes_up_intersect, ':'),"[[",1)
+```
+
+```{r}
+GOBP_ora_up = run_ORA_msigdb(genes_ora_up,
+                             cat="C5", 
+                             subcat = 'BP')
+
+GOBP_ora_up %>% as.data.frame()
+```
+
+
+```{r}
+Hall_ora_up = run_ORA_msigdb(genes_ora_up,
+                             cat="H")
+
+Hall_ora_up %>% as.data.frame()
+```
+
+```{r}
+genes_up = list()
+genes_down = list()
+L2F=1
+PVA=0.05
+BM=100
+PREFIX=c('MG63', 'KHOS', 'U2OS')
+COLORS=c('#CD5334', '#568EA3', '#F6AE2D',  '#758E4F')
+
+genes_up[[paste('KHOS')]] = (deg.khos.cult %>% filter(log2FoldChange > L2F & padj < PVA & baseMean > BM))$ID
+genes_down[[paste('KHOS')]] = (deg.khos.cult %>% filter(log2FoldChange < -L2F & padj < PVA & baseMean > BM))$ID
+
+genes_up[[paste('MG63')]] = (deg.mg63.cult %>% filter(log2FoldChange > L2F & padj < PVA & baseMean > BM))$ID
+genes_down[[paste('MG63')]] = (deg.mg63.cult %>% filter(log2FoldChange < -L2F & padj < PVA & baseMean > BM))$ID
+
+genes_up[[paste('U2OS')]] = (deg.u2os %>% filter(log2FoldChange > L2F & padj < PVA & baseMean > BM))$ID
+genes_down[[paste('U2OS')]] = (deg.u2os %>% filter(log2FoldChange < -L2F & padj < PVA & baseMean > BM))$ID
+
+```
+
+## UP
+
+```{r fig.height=7, fig.width=15}
+v1 = ggvenn(genes_up, 
+            show_percentage = F, 
+            fill_color = COLORS, 
+            stroke_color = NA, fill_alpha = 0.8,
+            text_size = 8, 
+            set_name_size = 10) + ggtitle('Up Cell Lines')
+v1
+```
+
+```{r}
+pdf(paste0("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/03_compare_DE_genes/figures/shared_cell_lines_cancer_", paste(PREFIX, collapse = '_'), ".up.venn.pdf"))
+v1
+dev.off()
+```
+
+
+```{r fig.height=7, fig.width=15}
+v1 = ggvenn(genes_down, 
+            show_percentage = F, 
+            fill_color = COLORS, 
+            stroke_color = NA, fill_alpha = 0.8,
+            text_size = 8, 
+            set_name_size = 10) + ggtitle('Down Cell Lines')
+v1
+```
+
+```{r}
+pdf(paste0("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/03_compare_DE_genes/figures/shared_cell_lines_cancer_", paste(PREFIX, collapse = '_'), ".down.venn.pdf"))
+v1
+dev.off()
+```
+
+
+```{r}
+Reduce(intersect, genes_up)
+```
+
+
+```{r}
+result = unique(c(intersect(genes_up[[1]], genes_up[[2]]), intersect(genes_up[[1]], genes_up[[3]]), intersect(genes_up[[3]], genes_up[[2]])))
+result
+```
+
+```{r}
+genes_ora_up = sapply(str_split(result, ':'),"[[",1)
+genes_ora_up
+```
+
+```{r}
+GOBP_ora_up = run_ORA_msigdb(genes_ora_up,
+                             cat="C5", 
+                             subcat = 'BP')
+
+GOBP_ora_up %>% as.data.frame()
+```
+
+
+```{r}
+Hall_ora_up = run_ORA_msigdb(genes_ora_up,
+                             cat="H")
+
+Hall_ora_up %>% as.data.frame()
+```
+
+```{r}
+p = (Hall_ora_up %>% as.data.frame())[1:10,] %>% 
+  separate(GeneRatio, into = c('k', 'n'), sep = '/') %>% mutate(GeneRatio = as.numeric(k)/as.numeric(n)) %>%
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +GeneRatio), y = GeneRatio, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0('Hallmark')) +
+  coord_flip()
+
+pdf(paste0("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/03_compare_DE_genes/figures/shared_", paste(PREFIX[c(1, 2, 4)], collapse = '_'), ".hallmark.ora.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (GOBP_ora_up %>% as.data.frame())[1:10,] %>% 
+  separate(GeneRatio, into = c('k', 'n'), sep = '/') %>% mutate(GeneRatio = as.numeric(k)/as.numeric(n)) %>%
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +GeneRatio), y = GeneRatio, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0('GO:BP')) +
+  coord_flip()
+
+pdf(paste0("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/03_compare_DE_genes/figures/shared_", paste(PREFIX[c(1, 2, 4)], collapse = '_'), ".GOBP.ora.pdf"), width = 10, height = 5)
+p
+dev.off()
+```
+
+```{r}
+genes_up = list()
+genes_down = list()
+L2F=1
+PVA=0.05
+BM=100
+PREFIX=c('MG63', 'KHOS', 'U2OS', 'hMSC')
+COLORS=c('#CD5334', '#568EA3', '#F6AE2D',  '#758E4F')
+
+genes_up[[paste('KHOS')]] = (deg.khos.cult %>% filter(log2FoldChange > L2F & padj < PVA & baseMean > BM))$ID
+genes_down[[paste('KHOS')]] = (deg.khos.cult %>% filter(log2FoldChange < -L2F & padj < PVA & baseMean > BM))$ID
+
+genes_up[[paste('MG63')]] = (deg.mg63.cult %>% filter(log2FoldChange > L2F & padj < PVA & baseMean > BM))$ID
+genes_down[[paste('MG63')]] = (deg.mg63.cult %>% filter(log2FoldChange < -L2F & padj < PVA & baseMean > BM))$ID
+
+genes_up[[paste('U2OS')]] = (deg.u2os %>% filter(log2FoldChange > L2F & padj < PVA & baseMean > BM))$ID
+genes_down[[paste('U2OS')]] = (deg.u2os %>% filter(log2FoldChange < -L2F & padj < PVA & baseMean > BM))$ID
+
+genes_up[[paste('hMSC')]] = (deg.hmsc %>% filter(log2FoldChange > L2F & padj < PVA & baseMean > BM))$ID
+genes_down[[paste('hMSC')]] = (deg.hmsc %>% filter(log2FoldChange < -L2F & padj < PVA & baseMean > BM))$ID
+```
+
+## UP
+
+```{r fig.height=7, fig.width=15}
+v1 = ggvenn(genes_up, 
+            show_percentage = F, 
+            fill_color = COLORS, 
+            stroke_color = NA, fill_alpha = 0.8,
+            text_size = 8, 
+            set_name_size = 10) + ggtitle('Up Cell Lines')
+v1
+```
+
+```{r fig.height=7, fig.width=15}
+v2 = ggvenn(genes_down, 
+            show_percentage = F, 
+            fill_color = COLORS, 
+            stroke_color = NA, fill_alpha = 0.8,
+            text_size = 10, 
+            set_name_size = 10) + ggtitle('Down Cell Lines')
+v2
+```
+```{r}
+pdf(paste0("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/03_compare_DE_genes/figures/shared_cell_lines_", paste(PREFIX, collapse = '_'), ".up.venn.pdf"))
+v1
+dev.off()
+```
+
+```{r}
+pdf(paste0("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/03_compare_DE_genes/figures/shared_cell_lines_", paste(PREFIX, collapse = '_'), ".down.venn.pdf"))
+v2
+dev.off()
+```
+
+## KHOS 
+
+```{r}
+genes_up = list()
+genes_down = list()
+L2F=1
+PVA=0.05
+BM=100
+PREFIX = c('KHOS')
+COLORS=c('#CD5334', '#F6AE2D')
+
+genes_up[[paste('Xenograft')]] = (deg.khos %>% filter(log2FoldChange > L2F & padj < PVA & baseMean > BM))$ID
+genes_down[[paste('Xenograft')]] = (deg.khos %>% filter(log2FoldChange < -L2F & padj < PVA & baseMean > BM))$ID
+
+genes_up[[paste('Culture')]] = (deg.khos.cult %>% filter(log2FoldChange > L2F & padj < PVA & baseMean > BM))$ID
+genes_down[[paste('Culture')]] = (deg.khos.cult %>% filter(log2FoldChange < -L2F & padj < PVA & baseMean > BM))$ID
+
+```
+
+```{r fig.height=7, fig.width=15}
+v1 = ggvenn(genes_up, 
+            show_percentage = F, 
+            fill_color = COLORS, 
+            stroke_color = NA, 
+            fill_alpha = 0.8,
+            text_size = 8, 
+            set_name_size = 10) + ggtitle('Up KHOS cell line and xgraft')
+v1
+```
+
+```{r fig.height=7, fig.width=15}
+v2 = ggvenn(genes_down, 
+            show_percentage = F, 
+            fill_color = COLORS, 
+            stroke_color = NA, 
+            text_size = 8, fill_alpha = 0.8, 
+            set_name_size = 10) + ggtitle('Down KHOS cell line and xgraft')
+v2
+```
+
+```{r}
+pdf(paste0("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/03_compare_DE_genes/figures/shared_", PREFIX, ".cultvsxgraft.up.venn.pdf"))
+v1
+dev.off()
+```
+
+```{r}
+pdf(paste0("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/03_compare_DE_genes/figures/shared_", PREFIX, ".cultvsxgraft.down.venn.pdf"))
+v2
+dev.off()
+```
+
+## MG63 
+
+```{r}
+genes_up = list()
+genes_down = list()
+L2F=1
+PVA=0.05
+BM=100
+COLORS=c('#CD5334', '#FFB41F', '#337357', '#007CBE')
+PREFIX='MG63'
+
+genes_up[[paste('Xenograft')]] = (deg.mg63 %>% filter(log2FoldChange > L2F & padj < PVA & baseMean > BM))$ID
+genes_down[[paste('Xenograft')]] = (deg.mg63 %>% filter(log2FoldChange < -L2F & padj < PVA & baseMean > BM))$ID
+
+genes_up[[paste('Culture')]] = (deg.mg63.cult %>% filter(log2FoldChange > L2F & padj < PVA & baseMean > BM))$ID
+genes_down[[paste('Culture')]] = (deg.mg63.cult %>% filter(log2FoldChange < -L2F & padj < PVA & baseMean > BM))$ID
+
+```
+
+```{r fig.height=7, fig.width=15}
+v1 = ggvenn(genes_up, 
+            show_percentage = F, fill_alpha = 0.8, 
+            fill_color = COLORS, 
+            stroke_color = NA, 
+            text_size = 8, 
+            set_name_size = 10) + ggtitle('UP')
+v1
+```
+
+```{r fig.height=7, fig.width=15}
+v2 = ggvenn(genes_down, 
+            show_percentage = F, fill_alpha = 0.8, 
+            fill_color = COLORS, 
+            stroke_color = NA, 
+            text_size = 8, 
+            set_name_size = 10) + ggtitle('UP')
+v2
+```
+
+```{r}
+pdf(paste0("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/03_compare_DE_genes/figures/shared_", paste(PREFIX[2]), ".cultvsxgraft.up.venn.pdf"))
+v1
+dev.off()
+```
+
+```{r}
+pdf(paste0("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/03_compare_DE_genes/figures/shared_", paste(PREFIX[2], collapse = '_'), ".cultvsxgraft.down.venn.pdf"))
+v2
+dev.off()
+```
+
+
+# other plots
+
+```{r}
+p = deg.khos %>% 
+  prep_vulcano_plot_data(bm = 50) %>%
+  left_join(deg.mg63 %>% prep_vulcano_plot_data(bm = 50), 
+            by = c('ID' = 'ID'), 
+            suffix = c('.khos', '.mg63')) %>%
+  mutate(diffexpressed.both = ifelse(diffexpressed.mg63 == diffexpressed.khos, diffexpressed.mg63, 'NO'),
+         delabel.both = ifelse(diffexpressed.both  != 'NO', delabel.mg63, NA)) %>%
+  arrange(!is.na(delabel.both), delabel.both) %>% 
+  separate(delabel.both, c("ENS", "SYM"), sep = ":") %>%
+  mutate(SYM = ifelse(grepl("^MT-|^RP[1-9]|AS1$", SYM), NA, SYM)) %>% 
+  rowwise() %>% 
+  mutate(padj.mean=mean(c(padj.khos, padj.mg63), na.rm=T)) %>%
+  mutate(padj.mean = ifelse(diffexpressed.both  != 'NO', padj.mean, 1)) %>%
+  ggplot(aes(log2FoldChange.khos, log2FoldChange.mg63, color = diffexpressed.both, label=SYM, size = -log10(padj.mean))) +
+  geom_point(alpha = 0.7) +
+  scale_color_manual(values=c("#28666E", "grey", "#F46036"),
+                       name="Change",
+                       labels=c("Down", "No Change", "Up")) +
+   geom_text_repel(show.legend	= F, box.padding = 0.5, max.overlaps = 20, color = '#2D434E') +
+   theme_bw() +
+   theme(text = element_text(size = 12),
+          axis.line = element_line(size = 0.5),
+          panel.border = element_blank(),
+          panel.grid = element_blank()) +
+  coord_cartesian(ylim = c(-13, 14), xlim = c(-7, 12)) +
+  geom_vline(xintercept=c(-1, 1), col="red", linetype='dotted') +
+    geom_hline(yintercept=c(-1, 1), col="red", linetype='dotted') +
+      xlab("log2 Fold Change - KHOS") +
+    ylab("log2 Fold Change - MG63") 
+p
+```
+
+```{r}
+pdf(paste0(PATH, 'figures/volcano/', PREFIX[1], '_', PREFIX[2], '_', COMP, '_log2fc.pdf'), width = 6, height = 4)
+p
+dev.off()
+```
+
+## Boxplot U2OS 
+
+```{r}
+group_pal = c('EZHIP' = 'red', 'EZHIP KO' = 'blue')
+```
+
+```{r}
+genes = c('TGFB2', 'CNN1', 'TENM4', 'OLFM2')
+out='/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/figures/boxplot/'
+
+for(g in genes){
+  pdf(paste0(out, g, '.boxplot.u2os.pdf'), height = 3, width = 3)
+  boxplot.u2os(counts.u2os, g, group_pal) %>% print
+  dev.off()
+}
+
+```
+
+## Boxplot hMSC  
+
+```{r}
+group_pal = c('EZHIP' = 'red', 'WT' = 'blue')
+```
+
+```{r}
+genes = c( 'JAG2', 'HES1', 'HEY1', 'HEY2', 'MYLIP')
+out='/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/figures/boxplot/'
+
+for(g in genes){
+  pdf(paste0(out, g, '.boxplot.hmsc.pdf'), height = 3, width = 3)
+  boxplot.hmsc(counts.hmsc, g, group_pal) %>% print
+  dev.off()
+}
+```
+
+
+## Boxplot MG63  
+
+```{r}
+group_pal = c('EZHIP' = 'red', 'WT' = 'blue')
+```
+
+```{r}
+genes = c('TGFB2', 'CNN1', 'TENM4', 'OLFM2')
+out='/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/figures/boxplot/'
+
+for(g in genes){
+  pdf(paste0(out, g, '.boxplot.mg63.cell.pdf'), height = 3, width = 3)
+  boxplot.hmsc(counts.mg63.x, g, group_pal) %>% print
+  dev.off()
+}
+```
+
+```{r}
+genes = c('TGFB2', 'CNN1', 'TENM4', 'OLFM2')
+out='/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/figures/boxplot/'
+
+for(g in genes){
+  #pdf(paste0(out, g, '.boxplot.mg63.xeno.pdf'), height = 3, width = 3)
+  boxplot.hmsc(counts.mg63.cult, g, group_pal) %>% print
+  #dev.off()
+}
+```
+
+## Boxplot MG63 and U2OS 
+
+```{r}
+group_pal = c('EZHIP' = 'red', 'WT' = 'blue',  'EZHIP KO' = 'blue')
+```
+
+
+```{r}
+df = full_join(counts.u2os %>% rownames_to_column('id'),
+          counts.mg63.x %>% rownames_to_column('id')) %>%
+  column_to_rownames('id')
+
+genes = c('TGFB2', 'CNN1', 'TENM4', 'OLFM2')
+out='/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/figures/boxplot/'
+
+for(g in genes){
+  pdf(paste0(out, g, '.boxplot.u2os.mg63.pdf'), height = 3, width = 3)
+  boxplot.u2os.mg63(df, g, group_pal) %>% print
+  dev.off()
+}
+
+```
+
+
+
+# Reference 
+## Baccin 
+
+```{r}
+load("/lustre06/project/6004736/alvann/from_narval/REFERENCES/Bone_Marrow_Baccin/data/NicheData10x.rda")
+```
+
+```{r}
+lab = list(`Osteo CAR` = names(Idents(NicheData10x)[Idents(NicheData10x) %in% c('Osteo-CAR')]),
+           `Adipo CAR` = names(Idents(NicheData10x)[Idents(NicheData10x) %in% c('Adipo-CAR')]),
+           `Ng2+ MSCs` = names(Idents(NicheData10x)[Idents(NicheData10x) %in% c('Ng2+ MSCs')]),
+           `Fibro/Chondro p.` = names(Idents(NicheData10x)[Idents(NicheData10x) %in% c('Fibro/Chondro p.')]),
+           `Osteoblasts` = names(Idents(NicheData10x)[Idents(NicheData10x) %in% c('Osteoblasts')]),
+           `Smooth muscle` = names(Idents(NicheData10x)[Idents(NicheData10x) %in% c('Smooth muscle')]), 
+           `Chondrocytes` = names(Idents(NicheData10x)[Idents(NicheData10x) %in% c('Chondrocytes')]), 
+           `Myofibroblasts` = names(Idents(NicheData10x)[Idents(NicheData10x) %in% c('Myofibroblasts')]), 
+           `Stromal fibro.` = names(Idents(NicheData10x)[Idents(NicheData10x) %in% c('Stromal fibro.')]), 
+           `Endosteal fibro.` = names(Idents(NicheData10x)[Idents(NicheData10x) %in% c('Endosteal fibro.')]), 
+           `Arteriolar fibro.` = names(Idents(NicheData10x)[Idents(NicheData10x) %in% c('Arteriolar fibro.')]))
+
+col = c('#D95D39', '#F57A53', '#84291F', '#F49D6E', '#647F5D', '#586BA4', '#417B5A', '#A0CED9', '#FFEE93', '#FCF5C7', '#FFD799')
+names(col) = names(lab)
+
+p = DimPlot(NicheData10x, label = F, cells.highlight = lab, cols = 'lightgrey', cols.highlight= col, pt.size = 1) +
+    theme_bw() +
+    scale_color_manual(values = col, na.value = '#EEEEEE') +
+    theme(text = element_text(size = 10),
+          panel.grid = element_blank(), 
+          panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+          aspect.ratio = 0.9)
+
+p = rasterize(p, layers='Point', dpi=500)
+p
+
+pdf(paste0(PATH, 'figures/ref.osteadipoocar.v2.pdf'), height = 5, width = 5)
+p
+dev.off()
+```
+
+```{r}
+p = FeaturePlot(NicheData10x, features = c('Cxcl12', 'Cxcl14', "Alpl", 'Dlx5', 'Wif1'), ncol = 3, cols = c("#F2EFC7", "#BC412B"), order = T) &
+    theme_bw() +
+   theme(text = element_text(size = 10),
+          panel.grid = element_blank(), 
+          panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+          aspect.ratio = 0.9, 
+         legend.key.width = unit(0.2, 'cm'))
+
+p
+
+pdf(paste0(PATH, 'figures/ref.osteadipoocar.exp.pdf'), height = 5, width = 10)
+p
+dev.off()
+```
+
+
+```{r}
+NicheData10x$cell_label = as.character(Idents(NicheData10x))
+sub = subset(NicheData10x, subset = cell_label %in% c('Osteo-CAR', 'Adipo-CAR', 'Chondrocytes', 'Fibro/Chondro p.', 'Myofibroblasts', 'Ng2+ MSCs', 'Osteoblasts', 'Smooth muscle', 'Stromal fibro.', 'Endosteal fibro.', 'Arteriolar fibro.'))
+
+DimPlot(sub)
+
+sub$cell_label = factor(sub$cell_label, levels = rev(c('Osteo-CAR', 'Adipo-CAR', 'Chondrocytes', 'Fibro/Chondro p.', 'Myofibroblasts', 'Ng2+ MSCs', 'Osteoblasts', 'Smooth muscle', 'Stromal fibro.', 'Endosteal fibro.', 'Arteriolar fibro.')))
+Idents(sub) = 'cell_label'
+
+p = DotPlot(sub, features = c('Cxcl12', 'Cxcl14', "Alpl", 'Dlx5', 'Wif1'),  cols = c("#F2EFC7", "#BC412B")) +
+  theme_bw() +
+   theme(text = element_text(size = 10),
+          panel.grid = element_blank(), 
+          panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+          aspect.ratio = 1.5, 
+         legend.key.width = unit(0.2, 'cm'), 
+         legend.key.height = unit(0.3, 'cm'), 
+         axis.title = element_blank(),
+         axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+p
+
+pdf(paste0(PATH, 'figures/ref.osteadipoocar.exp.dotplot.pdf'), height = 3, width = 10)
+p
+dev.off()
+```
+
+
+```{r}
+NicheData10x$cell_label = as.character(Idents(NicheData10x))
+sub = subset(NicheData10x, subset = cell_label %in% c('Osteo-CAR', 'Adipo-CAR', 'Chondrocytes', 'Fibro/Chondro p.', 'Myofibroblasts', 'Ng2+ MSCs', 'Osteoblasts', 'Smooth muscle', 'Stromal fibro.', 'Endosteal fibro.', 'Arteriolar fibro.'))
+
+DimPlot(sub)
+
+sub$cell_label = factor(sub$cell_label, levels = rev(c('Smooth muscle', 'Osteo-CAR', 'Adipo-CAR', 'Chondrocytes', 'Fibro/Chondro p.', 'Myofibroblasts', 'Ng2+ MSCs', 'Osteoblasts', 'Stromal fibro.', 'Endosteal fibro.', 'Arteriolar fibro.')))
+Idents(sub) = 'cell_label'
+
+p = DotPlot(sub, features = c('Notch3', 'Nr2f2', 'Kcne4', 'Hes1', 'Cald1', 'Rhob', 'Rcan2', 'Lmod1'),  cols = c("#F2EFC7", "#BC412B")) +
+  theme_bw() +
+   theme(text = element_text(size = 10),
+          panel.grid = element_blank(), 
+          panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+          aspect.ratio = 1.5, 
+         legend.key.width = unit(0.2, 'cm'), 
+         legend.key.height = unit(0.3, 'cm'), 
+         axis.title = element_blank(),
+         axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+p
+
+pdf(paste0(PATH, 'figures/ref.smoothmuscle.exp.dotplot.pdf'), height = 3, width = 10)
+p
+dev.off()
+```
+
+```{r }
+NicheData10x$cell_label = as.character(Idents(NicheData10x))
+sub = subset(NicheData10x, subset = cell_label %in% c('Osteo-CAR', 'Adipo-CAR', 'Chondrocytes', 'Fibro/Chondro p.', 'Myofibroblasts', 'Ng2+ MSCs', 'Osteoblasts', 'Smooth muscle', 'Stromal fibro.', 'Endosteal fibro.', 'Arteriolar fibro.'))
+
+DimPlot(sub)
+
+sub$cell_label = factor(sub$cell_label, levels = rev(c('Ng2+ MSCs', 'Osteo-CAR', 'Adipo-CAR', 'Chondrocytes', 'Fibro/Chondro p.', 'Myofibroblasts', 'Osteoblasts', 'Smooth muscle', 'Stromal fibro.', 'Endosteal fibro.', 'Arteriolar fibro.')))
+Idents(sub) = 'cell_label'
+
+p = DotPlot(sub, features = c('Spp1', 'Ctsk', 'Tnc', 'Gja1', 'Mmp13', 'Mmp14'),  cols = c("#F2EFC7", "#BC412B")) +
+  theme_bw() +
+   theme(text = element_text(size = 10),
+          panel.grid = element_blank(), 
+          panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+          aspect.ratio = 1.5, 
+         legend.key.width = unit(0.2, 'cm'), 
+         legend.key.height = unit(0.3, 'cm'), 
+         axis.title = element_blank(),
+         axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+p
+
+pdf(paste0(PATH, 'figures/ref.Ng2MSC.exp.dotplot.pdf'), height = 3, width = 10)
+p
+dev.off()
+```
+
+
+```{r}
+p = FeaturePlot(NicheData10x, features = c('Spp1', 'Ctsk', 'Tnc', 'Gja1', 'Mmp13'), ncol = 3, cols = c("#F2EFC7", "#BC412B"), order = T) &
+    theme_bw() +
+   theme(text = element_text(size = 10),
+          panel.grid = element_blank(), 
+          panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+          aspect.ratio = 0.9, 
+         legend.key.width = unit(0.2, 'cm'))
+
+p
+
+pdf(paste0(PATH, 'figures/ref.osteadipoocar.exp.pdf'), height = 5, width = 10)
+p
+dev.off()
+```
+
+```{r}
+p = ggvenn::ggvenn(data = list('Smooth muscle (Baccin)' = bone_atlas_baccin$hg_ens$`Smooth muscle`, 
+                           'Smooth muscle (DiMicheli)' = skeletal_muscle_atlas$hg_ens$`ACTA2+ MYH11+ MYL9+ Smooth muscle cells`),
+              show_percentage = F, 
+              fill_color = c('#D65108', '#EFA00B',  '#00A878'))
+
+pdf(paste0(PATH, 'figures/ref.smoothmuscle.venn.pdf'), height = 5, width = 5)
+p
+dev.off()
+
+intersect(bone_atlas_baccin$hg_sym$`Smooth muscle`, skeletal_muscle_atlas$hg_sym$`ACTA2+ MYH11+ MYL9+ Smooth muscle`)
+```
+
+
+```{r}
+p = ggvenn::ggvenn(data = list('Osteo CAR' = bone_atlas_baccin$hg_ens$`Osteo-CAR`, 
+                           'Adipo CAR' = bone_atlas_baccin$hg_ens$`Adipo-CAR`,
+                           'Ng2+ MSCs' = bone_atlas_baccin$hg_ens$`Ng2+ MSCs`), 
+              show_percentage = F, 
+              fill_color = c('#D65108', '#EFA00B',  '#00A878'))
+
+pdf(paste0(PATH, 'figures/ref.osteo-adipo-car-MSC.venn.pdf'), height = 5, width = 5)
+p
+dev.off()
+
+intersect(bone_atlas_baccin$hg_sym$`Osteo-CAR`, bone_atlas_baccin$hg_sym$`Adipo-CAR`)
+intersect(bone_atlas_baccin$hg_sym$`Osteo-CAR`, bone_atlas_baccin$hg_sym$`Ng2+ MSCs`)
+intersect(bone_atlas_baccin$hg_sym$`Ng2+ MSCs`, bone_atlas_baccin$hg_sym$`Adipo-CAR`)
+
+intersect(intersect(bone_atlas_baccin$hg_sym$`Osteo-CAR`, bone_atlas_baccin$hg_sym$`Ng2+ MSCs`),
+          intersect(bone_atlas_baccin$hg_sym$`Ng2+ MSCs`, bone_atlas_baccin$hg_sym$`Adipo-CAR`))
+```
+
+
+## DiMicheli 
+
+```{r}
+umap = data.table::fread('/lustre06/project/6004736/alvann/from_narval/REFERENCES/Skeletal_Muscle_Tissue_hg/data/UMAP.coords.tsv.gz', header = F)
+names(umap) = c('cell', 'UMAP 1', 'UMAP 2')
+
+meta = data.table::fread('/lustre06/project/6004736/alvann/from_narval/REFERENCES/Skeletal_Muscle_Tissue_hg/data/GSE143704_DeMicheli_HumanMuscleAtlas_metadata.txt.gz', header = T, check.names = T)
+names(meta)[1] = 'cell'
+meta = meta %>% select(!starts_with('V'))
+
+load('/lustre06/project/6004736/alvann/from_narval/REFERENCES/Skeletal_Muscle_Tissue_hg/seurat.Rda')
+
+remove = c('C1QA+ CD74+ Macrophages', 'IL7R+ PTPRC+ NKG7+ B/T/NK cells', 'CD36+ VWF+ Platelets', 'S100A9+ LYZ+ Inflammatory macrophages', 'HBA1+ Erythroblasts', 'ICAM1+ SELE+ VCAM1+ Endothelial', 'CLDN5+ PECAM1+ Endothelial')
+```
+
+```{r}
+pal = c('#8FC0A9', '#586BA4', '#D5A021', '#FFEE93', '#FCF5C7', '#FFD799', '#D95D39', '#F57A53', '#A0CED9')
+
+p = full_join(umap, meta, by = 'cell') %>%
+  mutate(col = ifelse(cell_annotation %in% remove, NA, cell_annotation)) %>%
+  ggplot(aes(`UMAP 1`, `UMAP 2`, color = col)) +
+  scale_color_manual(values = pal, na.value = '#EEEEEE') +
+  geom_point() +
+  theme_bw()  +
+    theme(text = element_text(size = 10),
+          panel.grid = element_blank(), 
+          panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+          aspect.ratio = 0.9)
+
+p = rasterize(p, layers='Point', dpi=500)
+p
+
+pdf(paste0(PATH, 'figures/ref.dimicheli.pdf'), height = 10, width = 10)
+p
+dev.off()
+```
+
+```{r}
+seurat = AddMetaData(seurat, meta %>% column_to_rownames('cell'))
+Idents(seurat) = 'cell_annotation'
+
+sub = subset(seurat, subset = cell_annotation %in% (setdiff(Idents(seurat), remove)))
+
+sub$cell_annotation = factor(sub$cell_annotation, 
+                             levels = rev(c('ACTA2+ MYH11+ MYL9+ Smooth muscle cells', 
+                                            'RGS5+ MYL9+ Pericytes', 
+                                            "ACTA1+ Mature skeletal muscle", 
+                                            "PAX7+ DLK1+ MuSCs and progenitors", 
+                                            "PAX7low MYF5+ MuSCs and progenitors", 
+                                            "APOD+ CFD+ PLAC9+ Adipocytes", 
+                                            "COL1A1+ Fibroblasts", 
+                                            "FBN1+ MFAP5+ CD55+ Fibroblasts", 
+                                            "DCN+ GSN+ MYOC+ Fibroblasts")),
+                             labels = rev(c('Smooth muscle cells', 
+                                            'Pericytes', 
+                                            "Mature skeletal muscle", 
+                                            "MuSCs and progenitors 1", 
+                                            "MuSCs and progenitors 2", 
+                                            "Adipocytes", 
+                                            "Fibroblasts 1", 
+                                            "Fibroblasts 2", 
+                                            "Fibroblasts 3")))
+
+Idents(sub) = 'cell_annotation'
+
+p = DotPlot(sub, 
+            features = c('NOTCH3', 'NR2F2', 'KCNE4', 'HES1', 'HES4', 'CALD1', 'RHOB', 'RCAN2', 'LMOD1'),  
+            cols = c("#F2EFC7", "#BC412B")) +
+   theme_bw() +
+   theme(text = element_text(size = 10),
+          panel.grid = element_blank(), 
+          panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+          aspect.ratio = 1.5, 
+         legend.key.width = unit(0.2, 'cm'), 
+         legend.key.height = unit(0.3, 'cm'), 
+         axis.title = element_blank(),
+         axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+p
+
+pdf(paste0(params$path, 'figures/ref.dimicheli.smoothmuscle.exp.pdf'), height = 4, width = 10)
+p
+dev.off()
+```
+

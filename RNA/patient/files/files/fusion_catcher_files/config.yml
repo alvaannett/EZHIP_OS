@@ -1,0 +1,7 @@
+
+PIPELINE_DIR: "/lustre06/project/6037386/data-kleinman/pipeline/v0/levels1-2/njabado/RNAseq/2022-10-28_Clincal_RNA_OS_hg/"
+#PIPELINE_DIR: "/lustre06/project/6037386/data-kleinman/pipeline/v0/levels1-2/njabado/RNAseq/2022-09-14_clinical_OS_hg/"
+OUT: "out/03_fusion_catcher/"
+
+THREADS: 5 
+MEM: 100000   

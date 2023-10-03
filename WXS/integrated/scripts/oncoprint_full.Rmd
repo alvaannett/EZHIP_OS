@@ -1,0 +1,295 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(ComplexHeatmap)
+```
+
+# Data 
+
+```{r}
+path_snv_germ = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/integrated/221106_oncoprint/out/01_concat/germline.cpsr.tiers.all.samples.tsv"
+path_snv_som = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/integrated/221106_oncoprint/out/01_concat/somatic.pcgr.tiers.all.samples.tsv"
+path_cna = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/integrated/221106_oncoprint/out/01_concat/cna.samples.tsv"
+path_cna_unpaired = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/integrated/221106_oncoprint/out/01_concat/cna_unpaired.tsv"
+#path_fusion = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/integrated/221106_oncoprint/out/01_concat/fusions_final.tsv"
+path_fusion = '/lustre06/project/6004736/alvann/from_narval/PIPELINES/FusionCatcher/all_fusions.txt'
+PATH_META_PATIENT = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/files/patient_meta_tmb.tsv"
+SAMPELS = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/integrated/221106_oncoprint/files/samples_K27me3.tsv"
+```
+
+```{r}
+samples = data.table::fread(SAMPELS)
+meta_pat = data.table::fread(PATH_META_PATIENT) %>% arrange(Patient_N) %>% filter(Patient_N %in% samples$Patient)
+
+samples = samples %>% left_join(meta_pat %>% select(Patient_N, EZHIP_Status), by = c('Patient' = 'Patient_N'))
+```
+
+
+```{r}
+snv_germ = data.table::fread(path_snv_germ)
+snv_som = data.table::fread(path_snv_som)
+cna = data.table::fread(path_cna)
+cna_unpaired = data.table::fread(path_cna_unpaired)
+fusion = data.table::fread(path_fusion)
+```
+
+```{r}
+onco = snv_germ %>% filter(CLINVAR_CLASSIFICATION == 'Pathogenic') %>% 
+       select(SYMBOL, VARIANT_CLASS, VCF_SAMPLE_ID, PROTEIN_CHANGE) %>% 
+       filter(SYMBOL %in% c('TP53', 'RB1')) %>%
+       mutate(VARIANT_CLASS = paste0(VARIANT_CLASS, ';germline'))
+
+onco = onco %>% left_join(samples %>% select(Patient, WXS), by = c('VCF_SAMPLE_ID' = 'WXS'))
+```
+
+```{r}
+tmp = snv_som %>% filter(CODING_STATUS == "coding" & TIER %in% c("TIER 2", "TIER1")) %>% select(SYMBOL, VARIANT_CLASS, VCF_SAMPLE_ID, PROTEIN_CHANGE)
+tmp = tmp %>% left_join(samples %>% select(Patient, WXS), by = c('VCF_SAMPLE_ID' = 'WXS'))
+onco = rbind(onco, tmp)
+```
+
+```{r}
+tmp = snv_som %>% filter(CODING_STATUS == "coding" & TIER %in% c("TIER 3")) %>% filter(AF_TUMOR >= 0.1) %>%  select(SYMBOL, VARIANT_CLASS, VCF_SAMPLE_ID, PROTEIN_CHANGE)
+tmp = tmp %>% left_join(samples %>% select(Patient, WXS), by = c('VCF_SAMPLE_ID' = 'WXS'))
+onco = rbind(onco, tmp)
+```
+
+```{r}
+tmp = snv_som %>% filter(CODING_STATUS == "coding" & TIER %in% c("TIER 4") & grepl('ASH[1-2]|DOT1|HDAC|EHMT2|KAT|KDM|MYC|TP53|SETD2|CCND', SYMBOL))  %>% filter(AF_TUMOR >= 0.1) %>% select(SYMBOL, VARIANT_CLASS, VCF_SAMPLE_ID, PROTEIN_CHANGE)
+tmp = tmp %>% left_join(samples %>% select(Patient, WXS), by = c('VCF_SAMPLE_ID' = 'WXS'))
+onco = rbind(onco, tmp)
+```
+
+
+```{r}
+tmp = snv_som %>% filter(CODING_STATUS == "coding" & grepl('HIST|H3F3', SYMBOL)) %>% select(SYMBOL, VARIANT_CLASS, VCF_SAMPLE_ID, PROTEIN_CHANGE) %>% filter(!VARIANT_CLASS == "substitution")
+tmp = tmp %>% left_join(samples %>% select(Patient, WXS), by = c('VCF_SAMPLE_ID' = 'WXS'))
+onco = rbind(onco, tmp)
+```
+
+```{r}
+tmp = cna %>% 
+  filter(!(tumor_suppressor == 'FALSE' & oncogene == 'TRUE' & log_r < 0)) %>% 
+  filter(!(tumor_suppressor == 'TRUE' & oncogene == 'FALSE' & log_r > 0)) %>%
+  select(symbol, sample_id, log_r) %>% 
+  distinct() %>% filter(log_r > 0.2 | log_r < -0.2) %>%
+  mutate(VARINT_CLASS = ifelse(log_r > 0, "cna gain", "cna loss")) 
+  
+
+names(tmp) = c('SYMBOL', "VCF_SAMPLE_ID", "PROTEIN_CHANGE", "VARIANT_CLASS")
+tmp = tmp %>% select('SYMBOL', "VARIANT_CLASS", "VCF_SAMPLE_ID", "PROTEIN_CHANGE")
+tmp = tmp %>% left_join(samples %>% select(Patient, WXS), by = c('VCF_SAMPLE_ID' = 'WXS'))
+onco = rbind(onco, tmp)
+```
+
+```{r}
+tmp = fusion %>% filter(!grepl('false', Effect)) %>% pivot_longer(-c(Sample, Effect, Fusion)) %>% select(!name) %>% mutate(VARIANT_CLASS = 'fusion') %>% select(Sample, Fusion, VARIANT_CLASS, value) %>% filter(value %in% c('TP53', 'ATRX', 'RB1'))
+names(tmp) = c("VCF_SAMPLE_ID", "PROTEIN_CHANGE", "VARIANT_CLASS", 'SYMBOL')
+tmp = tmp %>% select('SYMBOL', "VARIANT_CLASS", "VCF_SAMPLE_ID", "PROTEIN_CHANGE")
+tmp = tmp %>% left_join(samples %>% select(Patient, RNA), by = c('VCF_SAMPLE_ID' = 'RNA')) %>% filter(!is.na(Patient))
+onco = rbind(onco, tmp)
+```
+
+```{r}
+tmp = cna_unpaired %>% 
+  pivot_longer(-c(sample, GeneId), values_to = 'VARIANT_CLASS') %>%
+  filter(!VARIANT_CLASS == '') %>%
+  left_join(samples %>% select(Patient, WXS), by = c('sample' = 'WXS')) %>%
+  mutate(PROTEIN_CHANGE = NA) %>% 
+  select(GeneId, VARIANT_CLASS, sample, PROTEIN_CHANGE, Patient)
+
+names(tmp) = c('SYMBOL', "VARIANT_CLASS", "VCF_SAMPLE_ID", "PROTEIN_CHANGE", "Patient")  
+onco = rbind(onco, tmp)
+```
+
+```{r}
+#tmp = meta_pat %>% filter(EZHIP_Status == 'positive') %>% select(Patient_N, EZHIP_Status) %>% mutate(SYMBOL = 'EZHIP', VARIANT_CLASS = 'expressed', VCF_SAMPLE_ID = Patient_N)
+#names(tmp) = c('Patient', "PROTEIN_CHANGE",'SYMBOL', "VARIANT_CLASS", "VCF_SAMPLE_ID")
+#tmp = tmp %>% select('SYMBOL', "VARIANT_CLASS", "VCF_SAMPLE_ID", "PROTEIN_CHANGE", 'Patient')
+#onco = rbind(onco, tmp)
+```
+
+```{r}
+genes = unique(c((onco %>% distinct(SYMBOL, VCF_SAMPLE_ID) %>% count(SYMBOL, sort = T) %>% top_n(30))$SYMBOL, (onco %>% filter(grepl('H3F3|HIST|^KDM6|EZH|^KAT|^KMT|PIK3CA|AKT1|CCND|VEGFA|EHMT2|ASH1L|DOT1L|HDAC|ASH2L|MYC|CDK4|CDK6|TP53I11|PDGF|FGF|IGF|FOX|ALKHB|METTL|^RB1$|TERT|ATRX|MOS', SYMBOL)))$SYMBOL))
+```
+
+```{r}
+onco_mat = onco %>% 
+  filter(SYMBOL %in% genes & !VARIANT_CLASS == 'substitution') %>%
+  pivot_wider(names_from = Patient, 
+              values_from = VARIANT_CLASS, 
+              id_cols = SYMBOL, 
+              values_fill = NA,
+              values_fn = list(VARIANT_CLASS = ~paste(., collapse = ";")))
+
+onco_mat = onco_mat %>% column_to_rownames('SYMBOL')
+
+if(length(setdiff(samples$Patient, colnames(onco_mat))) > 0){
+onco_mat[as.character(setdiff(samples$Patient, colnames(onco_mat)))] = NA
+}
+```
+
+```{r}
+onco_mat
+```
+
+# Colors for onco_print 
+
+```{r}
+#col = c("SNV" = "#D55E00", 
+        "insertion" = "darkgreen", 
+        "deletion" = "#2A9134", 
+        "fusion" = 'darkgoldenrod1', 
+        'cna gain' = 'darkred', 
+        'cna loss' = 'darkblue', 
+        'expressed' = 'red')
+
+col = c("SNV" = "#FF8811", 
+        "insertion" = "#F1C241", 
+        "deletion" = "#DB5461", 
+        "cna loss" = '#467C9B', 
+        'fusion' = '#5B9A6D', 
+        'cna gain' = '#A31621')
+
+alter_fun = list(
+  background = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = "#DEE3E3", col = NA))
+  },
+  
+  `cna gain` = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = col["cna gain"], col = NA))
+  },
+  
+  `cna loss` = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = col["cna loss"], col = NA))
+  },
+  
+  SNV = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = col["SNV"], col = NA))
+  },
+  
+  expressed = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = col["expressed"], col = NA))
+  },
+  
+  insertion = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h*0.5, 
+              gp = gpar(fill = col["insertion"], col = NA))
+  },
+  
+  deletion = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h*0.5, 
+              gp = gpar(fill = col["deletion"], col = NA))
+  },
+   fusion = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h*0.5, 
+              gp = gpar(fill = col["fusion"], col = NA))
+  },
+  germline = function(x, y, w, h) 
+        grid.segments(x - w*0.5, y - h*0.5, x + w*0.5, y + h*0.5, gp = gpar(lwd = 2))
+)
+```
+
+# Meta data for oncoprint 
+
+```{r}
+s = samples %>% filter(Patient %in% names(onco_mat) & (!is.na(WXS) | !is.na(RNA))) 
+onco_mat = onco_mat[,as.character(s$Patient)]
+s = s[match(names(onco_mat), s$Patient)]
+s = left_join(s, meta_pat, by = c('Patient'= 'Patient_N'))
+names(onco_mat) == s$Patient
+
+s = s %>% mutate(Age_G = ifelse(Age_at_dx < 18, 'Pediatric', 'Adult'),
+                 Paired = ifelse(Paired == 'Yes', '*', NA), 
+                 EZHIP = ifelse(EZHIP_Status.x == 'positive', 'positive', NA))
+
+yes = '#393D3F'
+
+WXS = (s %>% mutate(WXS = ifelse(is.na(WXS), NA, 'yes')))$WXS
+RNA = (s %>% mutate(RNA = ifelse(is.na(RNA), NA, 'yes')))$RNA
+
+ha = HeatmapAnnotation(
+  annotation_name_gp = gpar(fontsize = 10),
+  EZHIP = s$EZHIP,
+  Age = s$Age_G,
+  Sex = s$Sex,
+  `WGS/WES` = anno_simple(WXS, 
+                    pch = s$Paired, 
+                    pt_gp = gpar(fontface = 'bold', col = 'white'),
+                    col = c('yes' = yes), 
+                    na_col = 'white', 
+                    height = unit(4, "mm"), 
+                    gp = gpar(col = "white")),
+  `RNA-seq` = anno_simple(RNA, 
+                    col = c('yes' = yes), 
+                    na_col = 'white', 
+                    height = unit(4, "mm"), 
+                    gp = gpar(col = "white")),
+  col = list(EZHIP = c('positive' = 'red'),
+             RNA = c('yes' = yes), 
+             Age = c('Pediatric' = '#7FB069', 'Young Adult' = '#317B22', 'Adult' = '#285238'),
+             Source = c('B' = '#82A3A1', 'R1' = '#465362', 'R2' = '#011936'), 
+             Sex = c('M' = 'gold', 'F' = 'darkorange')),
+  na_col = 'white'
+ )
+```
+
+# Order of genes 
+
+```{r}
+genes 
+genes_sort = c("H3F3A", "HIST3H3", "HIST1H3C", "HIST1H2AB", "ATRX", "KDM6A", "KDM6B", "KAT6B", 'KMT2C', "ASH2L",  "ASH1L" , "DOT1L", 'TP53', "RB1", "TERT", "CCND3", "MYC", "RUNX2", 'FOXP1', 'MOS', "VEGFA", "PDGFRA", "PIK3CA", "AKT1")
+genes_group = c(rep('Epigenome', 12), rep('Cell cycle', 5), rep('TF', 2), rep('Signaling', 5))
+
+onco_mat = onco_mat[genes_sort,]
+```
+
+```{r}
+# remove one H3F3A mutation that's not of interest 
+onco_mat['H3F3A', '53'] = NA
+```
+
+```{r}
+# extra legends 
+lgd_paired = Legend(pch = "*", type = "points", labels = "Mached Normal")
+lgd_data = Legend(labels = "Yes", legend_gp = gpar(fill = c(yes)), title = 'Data')
+
+# plot oncoprint 
+op = oncoPrint(onco_mat,
+               alter_fun = alter_fun,
+               col = col, 
+               pct_side = "right", 
+               row_names_side = "left", 
+               remove_empty_columns = F, 
+               show_column_names = T, 
+               row_names_gp = gpar(fontsize = 10),
+               column_names_gp = gpar(fontsize = 10), 
+               width = ncol(onco_mat)*unit(5, "mm"), 
+               height = nrow(onco_mat)*unit(5, "mm"), 
+               bottom_annotation = ha, 
+               column_names_side = "bottom", 
+               cluster_row_slices = F, 
+               row_order = rownames(onco_mat), 
+               row_split = genes_group, 
+               column_split = s$EZHIP)
+
+# draw oncoprint with legends 
+draw(op, annotation_legend_list = list(lgd_data, lgd_paired))
+```
+
+```{r fig.width=10, fig.height=6}
+pdf("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/integrated/221106_oncoprint/out/230310_oncoprint.pdf", width = 15, height = 10)
+draw(op, annotation_legend_list = list(lgd_data, lgd_paired))
+dev.off()
+```
+
+

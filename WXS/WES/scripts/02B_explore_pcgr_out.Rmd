@@ -1,0 +1,598 @@
+---
+title: "Oncoprint"
+output: 
+  html_document:
+    df_print: paged
+    theme: flatly
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+```{r}
+library(tidyverse)
+library(ComplexHeatmap)
+library(msigdbr)
+```
+
+```{r}
+PATH_DATA = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/WES/clinical_seq_patients/out/02_oncoprint/pcgr.tiers.all.samples.tsv"
+PATH_META_SAMPLE = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/files/sample_meta.tsv"
+PATH_META_PATIENT = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/files/patient_meta.tsv"
+```
+
+```{r}
+pcgr = data.table::fread(PATH_DATA) %>%
+       filter(grepl('_RE1', VCF_SAMPLE_ID) | grepl('_T', VCF_SAMPLE_ID)) %>%
+       separate(VCF_SAMPLE_ID, into = 'VCF_SAMPLE_ID', sep = '_')
+
+pcgr 
+```
+
+```{r}
+meta_pat = data.table::fread(PATH_META_PATIENT) %>% arrange(Patient_N)
+meta_pat
+```
+
+```{r}
+meta_samp = data.table::fread(PATH_META_SAMPLE)
+```
+
+```{r}
+meta = full_join(meta_samp, meta_pat, by = 'Patient_N') %>%
+       mutate(Response = tolower(Response), 
+              Primary_location = tolower(Primary_location)) %>%
+       filter(ID_triceps_signature_profyle %in% unique(pcgr$VCF_SAMPLE_ID))
+```
+
+# All TIERS 
+
+## Count by gene 
+
+```{r}
+pcgr %>%
+  filter(grepl('TIER', pcgr$TIER)) %>%
+  count(SYMBOL, sort = T)
+```
+
+## Count by gene and genomic change 
+
+```{r}
+pcgr %>% 
+  filter(grepl('TIER', pcgr$TIER)) %>%
+  count(SYMBOL, PROTEIN_CHANGE, sort = T)
+  
+```
+
+```{r}
+genes = (pcgr %>% filter(grepl("TIER [1-4]", TIER, )))$SYMBOL
+
+df = pcgr %>%
+filter(grepl("TIER [1-4]", TIER) &
+       SYMBOL %in% genes) %>%
+select(SYMBOL, VCF_SAMPLE_ID, VARIANT_CLASS) %>%
+pivot_wider(names_from = VCF_SAMPLE_ID, 
+            values_from = VARIANT_CLASS, 
+            id_cols = SYMBOL, 
+            values_fill = NA,
+            values_fn = list(VARIANT_CLASS = ~paste(., collapse = ";"))) %>%
+column_to_rownames('SYMBOL')
+
+# add empty rows for samples not in matrix 
+if(length(setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(df))) > 0){
+onco_matrix[setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(df))] = NA
+}
+
+```
+
+# TIER 1 and 2 
+
+## Filter tier 1 and 2 and count by gene 
+
+```{r}
+pcgr %>%
+filter(TIER %in% c('TIER 1', 'TIER 2')) %>%
+count(SYMBOL, sort = T)
+```
+
+## Filter tier 1 and 2 and count by gene and genomic change 
+
+```{r}
+pcgr %>%
+filter(TIER %in% c('TIER 1', 'TIER 2')) %>%
+count(SYMBOL, PROTEIN_CHANGE, sort = T)
+```
+
+# TIER 3 
+
+## Filter tier 3 and count by gene 
+
+```{r}
+pcgr %>%
+filter(TIER %in% c('TIER 3')) %>%
+count(SYMBOL, sort = T)
+```
+
+## Filter tier 3 and count by gene and genomic change 
+
+```{r}
+pcgr %>%
+filter(TIER %in% c('TIER 3')) %>%
+count(SYMBOL, PROTEIN_CHANGE, sort = T)
+```
+
+# TIER 4
+
+## Filter tier 4 and count by gene 
+
+```{r}
+pcgr %>%
+filter(TIER %in% c('TIER 4')) %>%
+count(SYMBOL, sort = T)
+```
+
+## Filter tier 4 and count by gene and genomic change 
+
+```{r}
+pcgr %>%
+filter(TIER %in% c('TIER 4')) %>%
+count(SYMBOL, PROTEIN_CHANGE, sort = T)
+```
+
+# Some recurrent gene families 
+
+## SOX
+
+```{r}
+pcgr %>%
+filter(grepl('SOX', SYMBOL))
+```
+## LEF
+
+```{r}
+pcgr %>%
+filter(grepl('LEF', SYMBOL))
+```
+## TCF
+
+```{r}
+pcgr %>%
+filter(grepl('TCF', SYMBOL))
+```
+
+## FGF
+
+```{r}
+pcgr %>%
+filter(grepl('FGF', SYMBOL))
+```
+
+## FOX
+
+```{r}
+pcgr %>%
+filter(grepl('FOX', SYMBOL))
+```
+
+## KDM
+
+```{r}
+pcgr %>%
+filter(grepl('KDM', SYMBOL))
+```
+
+# Oncoprint 
+
+```{r}
+col = c("SNV" = "#D55E00", 
+        "insertion" = "#15587A", 
+        "deletion" = "#2A9134", 
+        "substitution" = 'red')
+
+alter_fun = list(
+  background = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = "#DEE3E3", col = NA))
+  },
+  
+  SNV = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = col["SNV"], col = NA))
+  },
+  
+  insertion = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h*0.5, 
+              gp = gpar(fill = col["insertion"], col = NA))
+  },
+  
+  deletion = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h*0.5, 
+              gp = gpar(fill = col["deletion"], col = NA))
+  },
+  substitution = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h*0.5, 
+              gp = gpar(fill = col["substitution"], col = NA))
+  }
+)
+```
+
+## TIER 1, 2 and 3 full 
+
+```{r}
+genes = (pcgr %>% filter(TIER %in% c('TIER 1', 'TIER 2', 'TIER 3')))$SYMBOL
+```
+
+```{r}
+onco_matrix = pcgr %>%
+filter(TIER %in% c('TIER 1', 'TIER 2', 'TIER 3') &
+       SYMBOL %in% genes) %>%
+select(SYMBOL, VCF_SAMPLE_ID, VARIANT_CLASS) %>%
+pivot_wider(names_from = VCF_SAMPLE_ID, 
+            values_from = VARIANT_CLASS, 
+            id_cols = SYMBOL, 
+            values_fill = NA,
+            values_fn = list(VARIANT_CLASS = ~paste(., collapse = ";"))) %>%
+column_to_rownames('SYMBOL')
+
+# add empty rows for samples not in matrix 
+if(length(setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(onco_matrix))) > 0){
+onco_matrix[setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(onco_matrix))] = NA
+}
+```
+
+```{r}
+meta = meta[match(names(onco_matrix), meta$ID_triceps_signature_profyle),] 
+
+ha = HeatmapAnnotation(
+  annotation_name_gp= gpar(fontsize = 15),
+  EZHIP = meta$EZHIP_Status,
+  Gender = meta$Sex,
+  col = list(Gender = c("F" = "#413C58" , "M" = "#F18805"),
+             EZHIP = c('positive' = "#C12623", "negative" = "#386FA4"))
+ )
+```
+
+```{r}
+op_123_full = oncoPrint(onco_matrix,
+               alter_fun = alter_fun,
+               bottom_annotation = ha,
+               col = col, 
+               pct_side = "right", 
+               row_names_side = "left", 
+               remove_empty_columns = F, 
+               show_column_names = T, 
+               right_annotation=NULL, 
+               top_annotation = NULL, 
+               row_names_gp = gpar(fontsize = 20),
+               column_names_gp = gpar(fontsize = 20), 
+               heatmap_height = unit(70, "cm"), 
+               heatmap_width = unit(20, "cm"))
+```
+
+
+## TIER 1, 2 and 3 
+
+```{r}
+genes = (pcgr %>%
+filter(TIER %in% c('TIER 1', 'TIER 2', 'TIER 3') & AF_TUMOR > 0.01) %>% 
+distinct(SYMBOL, VCF_SAMPLE_ID) %>%
+count(SYMBOL) %>%
+filter(n > 1))$SYMBOL
+
+genes = unique(c(genes, (pcgr %>% filter(TIER %in% c('TIER 1', 'TIER 2')))$SYMBOL))
+```
+
+```{r}
+onco_matrix = pcgr %>%
+filter(TIER %in% c('TIER 1', 'TIER 2', 'TIER 3') &
+       SYMBOL %in% genes) %>%
+select(SYMBOL, VCF_SAMPLE_ID, VARIANT_CLASS) %>%
+pivot_wider(names_from = VCF_SAMPLE_ID, 
+            values_from = VARIANT_CLASS, 
+            id_cols = SYMBOL, 
+            values_fill = NA,
+            values_fn = list(VARIANT_CLASS = ~paste(., collapse = ";"))) %>%
+column_to_rownames('SYMBOL')
+
+# add empty rows for samples not in matrix 
+if(length(setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(onco_matrix))) > 0){
+onco_matrix[setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(onco_matrix))] = NA
+}
+```
+
+```{r}
+meta = meta[match(names(onco_matrix), meta$ID_triceps_signature_profyle),] 
+
+ha = HeatmapAnnotation(
+  annotation_name_gp= gpar(fontsize = 15),
+  EZHIP = meta$EZHIP_Status,
+  Gender = meta$Sex,
+  col = list(Gender = c("F" = "#413C58" , "M" = "#F18805"),
+             EZHIP = c('positive' = "#C12623", "negative" = "#386FA4"))
+ )
+```
+
+```{r}
+op_123 = oncoPrint(onco_matrix,
+               alter_fun = alter_fun, 
+               bottom_annotation = ha,
+               col = col, 
+               pct_side = "right", 
+               row_names_side = "left", 
+               remove_empty_columns = F, 
+               show_column_names = T, 
+               right_annotation=NULL, 
+               top_annotation = NULL, 
+               row_names_gp = gpar(fontsize = 20),
+               column_names_gp = gpar(fontsize = 20), 
+               heatmap_height = unit(25, "cm"), 
+               heatmap_width = unit(20, "cm"))
+```
+
+## SOX  
+
+```{r}
+onco_matrix = pcgr %>%
+filter(TIER %in% c('TIER 1', 'TIER 2', 'TIER 3', 'TIER 4') &
+       (grepl('SOX', SYMBOL) | grepl('LEF', SYMBOL) | grepl('TCF', SYMBOL) )) %>%
+select(SYMBOL, VCF_SAMPLE_ID, VARIANT_CLASS) %>%
+pivot_wider(names_from = VCF_SAMPLE_ID, 
+            values_from = VARIANT_CLASS, 
+            id_cols = SYMBOL, 
+            values_fill = NA,
+            values_fn = list(VARIANT_CLASS = ~paste(., collapse = ";"))) %>%
+column_to_rownames('SYMBOL')
+
+# add empty rows for samples not in matrix 
+if(length(setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(onco_matrix))) > 0){
+onco_matrix[setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(onco_matrix))] = NA
+}
+```
+
+```{r}
+meta = meta[match(names(onco_matrix), meta$ID_triceps_signature_profyle),] 
+
+ha = HeatmapAnnotation(
+  annotation_name_gp= gpar(fontsize = 15),
+  EZHIP = meta$EZHIP_Status,
+  Gender = meta$Sex,
+  col = list(Gender = c("F" = "#413C58" , "M" = "#F18805"),
+             EZHIP = c('positive' = "#C12623", "negative" = "#386FA4"))
+ )
+```
+
+```{r}
+op_SOX = oncoPrint(onco_matrix,
+               alter_fun = alter_fun, 
+               bottom_annotation = ha,
+               col = col, 
+               pct_side = "right", 
+               row_names_side = "left", 
+               remove_empty_columns = F, 
+               show_column_names = T, 
+               right_annotation=NULL, 
+               top_annotation = NULL, 
+               row_names_gp = gpar(fontsize = 20),
+               column_names_gp = gpar(fontsize = 20), 
+               heatmap_height = unit(20, "cm"), 
+               heatmap_width = unit(20, "cm"))
+```
+
+## FOX  
+
+```{r}
+onco_matrix = pcgr %>%
+filter(TIER %in% c('TIER 1', 'TIER 2', 'TIER 3', 'TIER 4') &
+       (grepl('FOX', SYMBOL))) %>%
+select(SYMBOL, VCF_SAMPLE_ID, VARIANT_CLASS) %>%
+pivot_wider(names_from = VCF_SAMPLE_ID, 
+            values_from = VARIANT_CLASS, 
+            id_cols = SYMBOL, 
+            values_fill = NA,
+            values_fn = list(VARIANT_CLASS = ~paste(., collapse = ";"))) %>%
+column_to_rownames('SYMBOL')
+
+# add empty rows for samples not in matrix 
+if(length(setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(onco_matrix))) > 0){
+onco_matrix[setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(onco_matrix))] = NA
+}
+```
+
+```{r}
+meta = meta[match(names(onco_matrix), meta$ID_triceps_signature_profyle),] 
+
+ha = HeatmapAnnotation(
+  annotation_name_gp= gpar(fontsize = 15),
+  EZHIP = meta$EZHIP_Status,
+  Gender = meta$Sex,
+  col = list(Gender = c("F" = "#413C58" , "M" = "#F18805"),
+             EZHIP = c('positive' = "#C12623", "negative" = "#386FA4"))
+ )
+```
+
+```{r}
+op_FOX = oncoPrint(onco_matrix,
+               alter_fun = alter_fun, 
+               bottom_annotation = ha, 
+               col = col, 
+               pct_side = "right", 
+               row_names_side = "left", 
+               remove_empty_columns = F, 
+               show_column_names = T, 
+               right_annotation=NULL, 
+               top_annotation = NULL, 
+               row_names_gp = gpar(fontsize = 20),
+               column_names_gp = gpar(fontsize = 20), 
+               heatmap_height = unit(20, "cm"), 
+               heatmap_width = unit(20, "cm"))
+```
+
+## Meth
+
+```{r}
+onco_matrix = pcgr %>%
+filter(TIER %in% c('TIER 1', 'TIER 2', 'TIER 3', 'TIER 4') &
+       (grepl('KDM6', SYMBOL))) %>%
+select(SYMBOL, VCF_SAMPLE_ID, VARIANT_CLASS) %>%
+pivot_wider(names_from = VCF_SAMPLE_ID, 
+            values_from = VARIANT_CLASS, 
+            id_cols = SYMBOL, 
+            values_fill = NA,
+            values_fn = list(VARIANT_CLASS = ~paste(., collapse = ";"))) %>%
+column_to_rownames('SYMBOL')
+
+# add empty rows for samples not in matrix 
+if(length(setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(onco_matrix))) > 0){
+onco_matrix[setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(onco_matrix))] = NA
+}
+```
+
+```{r}
+meta = meta[match(names(onco_matrix), meta$ID_triceps_signature_profyle),] 
+
+ha = HeatmapAnnotation(
+  annotation_name_gp= gpar(fontsize = 15),
+  EZHIP = meta$EZHIP_Status,
+  Gender = meta$Sex,
+  col = list(Gender = c("F" = "#413C58" , "M" = "#F18805"),
+             EZHIP = c('positive' = "#C12623", "negative" = "#386FA4"))
+ )
+```
+
+```{r}
+op_meth = oncoPrint(onco_matrix,
+               alter_fun = alter_fun, 
+               bottom_annotation = ha,
+               col = col, 
+               pct_side = "right", 
+               row_names_side = "left", 
+               remove_empty_columns = F, 
+               show_column_names = T, 
+               right_annotation=NULL, 
+               top_annotation = NULL, 
+               row_names_gp = gpar(fontsize = 20),
+               column_names_gp = gpar(fontsize = 20), 
+               heatmap_height = unit(20, "cm"), 
+               heatmap_width = unit(20, "cm"))
+```
+
+## FGF  
+
+```{r}
+onco_matrix = pcgr %>%
+filter(TIER %in% c('TIER 1', 'TIER 2', 'TIER 3', 'TIER 4') &
+       (grepl('FGF', SYMBOL))) %>%
+select(SYMBOL, VCF_SAMPLE_ID, VARIANT_CLASS) %>%
+pivot_wider(names_from = VCF_SAMPLE_ID, 
+            values_from = VARIANT_CLASS, 
+            id_cols = SYMBOL, 
+            values_fill = NA,
+            values_fn = list(VARIANT_CLASS = ~paste(., collapse = ";"))) %>%
+column_to_rownames('SYMBOL')
+
+# add empty rows for samples not in matrix 
+if(length(setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(onco_matrix))) > 0){
+onco_matrix[setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(onco_matrix))] = NA
+}
+```
+
+```{r}
+meta = meta[match(names(onco_matrix), meta$ID_triceps_signature_profyle),] 
+
+ha = HeatmapAnnotation(
+  annotation_name_gp= gpar(fontsize = 15),
+  EZHIP = meta$EZHIP_Status,
+  Gender = meta$Sex,
+  col = list(Gender = c("F" = "#413C58" , "M" = "#F18805"),
+             EZHIP = c('positive' = "#C12623", "negative" = "#386FA4"))
+ )
+```
+
+```{r}
+op_FGF = oncoPrint(onco_matrix,
+               alter_fun = alter_fun, 
+               bottom_annotation = ha,
+               col = col, 
+               pct_side = "right", 
+               row_names_side = "left", 
+               remove_empty_columns = F, 
+               show_column_names = T, 
+               right_annotation=NULL, 
+               top_annotation = NULL, 
+               row_names_gp = gpar(fontsize = 20),
+               column_names_gp = gpar(fontsize = 20), 
+               heatmap_height = unit(20, "cm"), 
+               heatmap_width = unit(20, "cm"))
+```
+
+
+## Histone  
+
+```{r}
+hist_genes = msigdbr(species = "human", category = 'C5') %>%          
+                      dplyr::select(c("gs_name", "gene_symbol", "human_ensembl_gene")) %>%
+                      dplyr::filter(grepl('HISTONE', gs_name))
+
+hist_genes = hist_genes[grepl('ASH|DOT|NSD|KDM|KMT|SET|KAT|HDAC', hist_genes$gene_symbol),]
+```
+
+
+```{r}
+onco_matrix = pcgr %>%
+filter(TIER %in% c('TIER 1', 'TIER 2', 'TIER 3', 'TIER 4') & (ENSEMBL_GENE_ID %in% c(hist_genes$human_ensembl_gene)) | grepl('SETBP1|HIST|CXorf67|EP300', SYMBOL)) %>%
+  filter(CODING_STATUS == 'coding') %>%
+select(SYMBOL, VCF_SAMPLE_ID, VARIANT_CLASS) %>% 
+pivot_wider(names_from = VCF_SAMPLE_ID, 
+            values_from = VARIANT_CLASS, 
+            id_cols = SYMBOL, 
+            values_fill = NA,
+            values_fn = list(VARIANT_CLASS = ~paste(., collapse = ";"))) %>%
+column_to_rownames('SYMBOL')
+
+# add empty rows for samples not in matrix 
+if(length(setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(onco_matrix))) > 0){
+onco_matrix[setdiff(unique(pcgr$VCF_SAMPLE_ID), colnames(onco_matrix))] = NA
+}
+```
+
+```{r}
+meta = meta[match(names(onco_matrix), meta$ID_triceps_signature_profyle),] 
+
+ha = HeatmapAnnotation(
+  annotation_name_gp= gpar(fontsize = 15),
+  EZHIP = meta$EZHIP_Status,
+  Gender = meta$Sex,
+  col = list(Gender = c("F" = "#413C58" , "M" = "#F18805"),
+             EZHIP = c('positive' = "#C12623", "negative" = "#386FA4"))
+ )
+```
+
+```{r}
+op_histone = oncoPrint(onco_matrix,
+               alter_fun = alter_fun, 
+               bottom_annotation = ha,
+               col = col, 
+               pct_side = "right", 
+               row_names_side = "left", 
+               remove_empty_columns = F, 
+               show_column_names = T, 
+               right_annotation=NULL, 
+               top_annotation = NULL, 
+               row_names_gp = gpar(fontsize = 20),
+               column_names_gp = gpar(fontsize = 20), 
+               heatmap_height = unit(20, "cm"), 
+               heatmap_width = unit(20, "cm"))
+```
+
+## Save plots 
+
+```{r}
+pdf('/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/WES/clinical_seq_patients/out/02_oncoprint/oncoprint.pdf', width = 20, height = 30)
+draw(op_123_full)
+draw(op_123)
+draw(op_histone)
+dev.off()
+```
+
+

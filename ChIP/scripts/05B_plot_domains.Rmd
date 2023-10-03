@@ -1,0 +1,217 @@
+---
+title: "Plot Domains"
+output:
+  html_document:
+    df_print: paged
+    theme: flatly
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+```{r}
+knitr::opts_chunk$set(echo=FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(GenomicRanges)
+library(ggsignif)
+```
+
+```{r}
+path="/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/ChIP/U2OS/out/05_call_domains/"
+samples = c('U2OS_C1A',  'U2OS_C1B',  'U2OS_C1C',  'U2OS_C54A',  'U2OS_C54B',  'U2OS_C54C')
+groups = c(rep('EZHIP', 3), rep('EZHIP KO', 3))
+```
+
+```{r}
+domains = data.table::fread(paste0(path, samples[1], '.bed')) %>% mutate(sample = samples[1], group = groups[1])
+
+for(i in 2:length(samples)){
+  tmp = data.table::fread(paste0(path, samples[i], '.bed')) %>% mutate(sample = samples[i], group = groups[i])
+  domains = rbind(domains, tmp)
+}
+
+names(domains) = c('chr', 'start', 'end', 'name', 'signal', 'sample', 'group')
+
+domains$width = makeGRangesFromDataFrame(domains, keep.extra.columns = T) %>% width
+
+domains = domains %>% 
+  mutate(group = factor(group, levels = c('EZHIP KO', 'EZHIP')),
+         sample = str_remove(sample, 'U2OS_'))
+```
+
+```{r}
+domains %>% filter(signal > 2) %>% count(sample)
+```
+
+```{r}
+p1 = domains %>% filter(signal > 2) %>% 
+  count(sample, group) %>%
+  ggplot(aes(group, n, color = group)) +
+  geom_point(size = 4, alpha = 0.9) +
+  scale_color_manual(values = c('blue', 'red')) +
+  stat_summary(fun.y=mean, geom="crossbar", color="black", width = 0.2) +
+  theme_bw() +
+  theme(text = element_text(size = 20),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank(), 
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_blank(), 
+        legend.position = 'none') +
+  geom_signif(comparisons = list(c("EZHIP KO", "EZHIP")), map_signif_level=F, textsize = 5, test = 't.test', color = 'black', y_position = 6000) + 
+  ylab('N domains')
+
+p2 = domains %>% filter(signal > 2) %>% 
+  group_by(sample, group) %>%
+  summarise(median = median(width)) %>%
+  mutate(median = median/1000) %>%
+  ggplot(aes(group, median, color = group)) +
+  geom_point(size = 4, alpha = 0.9) +
+  scale_color_manual(values = c('blue', 'red')) +
+  stat_summary(fun.y=mean, geom="crossbar", color="black", width = 0.2) +
+  theme_bw() +
+  theme(text = element_text(size = 20),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank(), 
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_blank(),  
+        legend.position = 'none') +
+  geom_signif(comparisons = list(c("EZHIP KO", "EZHIP")), map_signif_level=TRUE, textsize = 5, test = 't.test', color = 'black', y_position = 70) +
+  ylab('Domain width (kb)')
+
+p3 = domains %>% filter(signal > 2) %>% 
+  group_by(sample, group) %>%
+  summarise(median = median(signal)) %>%
+  ggplot(aes(group, median, color = group)) +
+  geom_point(size = 4, alpha = 0.9) +
+  scale_color_manual(values = c('blue', 'red')) +
+  stat_summary(fun.y=mean, geom="crossbar", color="black", width = 0.2) +
+  theme_bw() +
+  theme(text = element_text(size = 20),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank(), 
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_blank(),  
+        legend.position = 'none') +
+  geom_signif(comparisons = list(c("EZHIP KO", "EZHIP")), map_signif_level=TRUE, textsize = 5, test = 't.test', color = 'black', y_position = 4) +
+  ylab('Signal intensity')
+
+cowplot::plot_grid(p1, p2, p3, nrow = 1)
+
+```
+
+```{r}
+left_join(domains %>% filter(signal > 2) %>% 
+  count(sample, group),
+domains %>% filter(signal > 2) %>% 
+  group_by(sample, group) %>%
+  summarise(median = median(width)) %>%
+  mutate(median = median/1000)) %>%
+  ggplot(aes(n, median, color = group)) +
+  geom_point(size = 4, alpha = 0.9) +
+  scale_color_manual(values = c('blue', 'red')) +
+  stat_summary(fun.y=mean, geom="crossbar", color="black", width = 0.2) +
+  theme_bw() +
+  theme(text = element_text(size = 20),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank(), 
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 15),  
+        legend.position = 'none') +
+  ylab('Domain width (kb)') + 
+  xlab('N domains')
+```
+
+
+```{r}
+pdf(paste0(path, 'U2OS_domain_width_avrage.pdf'), width = 3, height = 4)
+p2
+dev.off()
+pdf(paste0(path, 'U2OS_n_domain_avrage.pdf'), width = 3, height = 4)
+p1
+dev.off()
+pdf(paste0(path, 'U2OS_signal_intensity_avrage.pdf'), width = 3, height = 4)
+p3
+dev.off()
+```
+
+
+
+```{r}
+boxplot = domains %>% filter(signal > 2) %>%
+  ggplot(aes(x = sample, y = width, fill = group)) +
+  geom_boxplot(outlier.shape = NA, notch = T, notchwidth = 0.7, alpha = 0.7) +
+  scale_fill_manual(values = c('red', 'blue')) +
+  coord_cartesian(ylim = c(40000, 200000)) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        axis.title = element_blank(),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        legend.position = 'none')
+
+boxplot
+```
+```{r}
+median = domains %>% filter(signal > 2) %>%
+  group_by(sample, group) %>%
+  summarise(median = median(width))
+
+t.test(median[median$group == 'EZHIP-KO',]$median, 
+            median[median$group == 'EZHIP',]$median) 
+```
+
+```{r}
+boxplot_1rep = domains %>% filter(signal > 2 & sample %in% c('C1B', 'C54B')) %>%
+  ggplot(aes(x = sample, y = width, fill = group)) +
+  geom_boxplot(outlier.shape = NA, notch = T, notchwidth = 0.7, alpha = 0.7) +
+  scale_fill_manual(values = c('red', 'blue')) +
+  coord_cartesian(ylim = c(40000, 170000)) +
+  geom_signif(comparisons = list(c("C1B", "C54B")), map_signif_level=TRUE, textsize = 5, y_position = 150000) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        axis.title = element_blank(),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        legend.position = 'none')
+
+boxplot_1rep
+```
+
+```{r}
+t.test(domains[domains$sample == 'C1B',]$width, 
+      domains[domains$sample == 'C54B',]$width) 
+```
+
+```{r}
+for(s in samples){
+  domains %>% filter(signal > 2 & sample == str_remove(s, 'U2OS_')) %>% data.table::fwrite(paste0(path, s, '.domains.filtered.bed'), sep = '\t', col.names = F, row.names = F)
+}
+```
+
+```{r}
+pdf(paste0(path, 'domain_width_boxplot.pdf'))
+boxplot
+dev.off()
+
+pdf(paste0(path, 'domain_width_boxplot_1rep.pdf'), width = 4, height = 5)
+boxplot_1rep
+dev.off()
+```
+
+

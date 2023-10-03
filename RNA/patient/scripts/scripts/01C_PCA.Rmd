@@ -1,0 +1,209 @@
+---
+title: "Visulaize output DGE analysis - Raptor Level 3"
+output:
+  html_document:
+    df_print: paged
+    theme: flatly
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+params:
+    path_raptor: '/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/patient_clinical_seq/out/01_raptor_exprtools/EZHIP_negVsEZHIP_pos_no_reps_filt/'
+    prefix: NA
+    comp: NA
+    colors: NA
+    reference: 'Ensembl'
+---
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning=FALSE)
+```
+
+Explore output from Raptor L3 (PCA + DEG ) for hMSC cells (WT vs EZHIP+).
+
+```{r, results = FALSE}
+library(ggplot2)
+library(tidyr)
+library(rlist)
+library(dplyr)
+library(tibble)
+library(magrittr)
+library(patchwork)
+library(ggrepel)
+library(pheatmap)
+library(stringr)
+library(gplots)
+library(data.table)
+```
+
+```{r}
+pca_plot = function(df, colors, info.smpl, title, lab = T, pca.cont, PC_1='PC1', PC_2='PC2', color_by = 'Group'){
+  p = df %>%
+    t %>%
+    as.data.frame() %>%
+    dplyr::select(PC_1, PC_2) %>%
+    rownames_to_column("Nickname") %>%
+    left_join(info.smpl, by="Nickname") %>%
+    ggplot(aes(x=.data[[PC_1]], y=.data[[PC_2]], color = .data[[color_by]])) +
+    geom_point(size = 4) +
+    scale_color_manual(values = colors[[color_by]]) +
+    theme_bw() +
+    theme(text = element_text(size=13)) +
+    xlab(paste0(PC_1, ' ', (pca.cont %>% filter(PC == PC_1))$percentVariance, '%')) +
+    ylab(paste0(PC_2, ' ', (pca.cont %>% filter(PC == PC_2))$percentVariance, '%')) +
+    ggtitle(title) +
+    theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank(), 
+        aspect.ratio = 1)
+
+  if(lab){
+    p = p +
+    geom_text_repel(aes(label = Nickname), 
+                    show.legend	= F, 
+                    box.padding = 0.5, 
+                    max.overlaps = Inf, 
+                    color="black", 
+                    size = 2) 
+  }
+  return(p)
+}
+
+prep_vulcano_plot_data = function(df, pval=0.05, fc=1, bm=100){
+  df$diffexpressed = "NO"
+  df$diffexpressed[df$log2FoldChange > 1 & df$padj < pval & df$baseMean > bm] = "UP"
+  df$diffexpressed[df$log2FoldChange < -1 & df$padj < pval & df$baseMean > bm] = "DOWN"
+  df$delabel = NA
+  df$delabel[df$diffexpressed != "NO"] = df$ID[df$diffexpressed != "NO"]
+  return(df)
+}
+
+vulcano_plot = function(df, log2fc = 1, label_top_n = 20, pval=0.05){  
+
+  p = df %>%
+    arrange(!is.na(delabel), delabel) %>%
+    separate(delabel, c("ENS", "SYM"), sep = ":") %>%
+    mutate(SYM = ifelse(padj > (deg %>% dplyr::select(padj) %>% top_n(-label_top_n) %>% top_n(1) %>% unique() %>% as.numeric()), NA, SYM)) %>%
+    ggplot(aes(x=log2FoldChange, y=-log10(padj), col=diffexpressed, label=SYM)) +
+    geom_point(size=2, alpha=0.7) +
+    scale_color_manual(values=c("#28666E", "grey", "#F46036"),
+                       name="Change",
+                       labels=c("Down", "No Change", "Up")) +
+    geom_vline(xintercept=c(-log2fc, log2fc), col="red", linetype='dotted') +
+    geom_hline(yintercept=-log10(pval), col="red", linetype='dotted') +
+    geom_text_repel(show.legend	= F, box.padding = 0.5, max.overlaps = Inf, color = '#2D434E') +
+    theme_bw() +
+    theme(text=element_text(size=13), legend.position = 'none') +
+    xlab("log2 Fold Change") +
+    ylab("-log10 Adjusted p-value") +
+    theme(text = element_text(size = 15),
+          axis.line = element_line(size = 0.5),
+          panel.border = element_blank(),
+          panel.grid = element_blank())
+
+  return(p)
+}
+```
+
+# DATA
+
+```{r}
+# pqth to raptor output
+PATH = params$path_raptor
+
+# comparison for DEG  
+COMP = params$comp
+```
+
+```{r}
+pca.10000 = read.csv(paste(PATH, "cluster/vst.", params$reference, ".ensGene.exon.complete.euclidean.10000.most.var/samplePCA.vst.", params$reference, ".ensGene.exon.10000.most.var.tsv", sep=""), sep="\t", check.names = F)
+
+pca.cont = data.table::fread(paste0(PATH, "cluster/vst.", params$reference, ".ensGene.exon.complete.euclidean.10000.most.var/samplePCA.vst.", params$reference, ".ensGene.exon.10000.most.var.PCcontribution.tsv")) %>%
+  mutate(across(where(is.numeric), round, 1))
+```
+
+```{r}
+info.samples = read.csv(paste(PATH, "info.samples.tsv", sep=""), sep="\t")
+info.groups = read.csv(paste(PATH, "info.groups.tsv", sep=""), sep="\t")
+info.samples = left_join(info.samples, info.groups, by="Group")
+
+info.samples
+```
+
+```{r}
+set.seed(123)
+
+COLORS = list(Group = info.groups$Color)
+names(COLORS$Group) = info.groups$Group
+
+COLORS$Sex = MetBrewer::met.brewer('Juarez', length(unique(info.samples$Sex)))
+names(COLORS$Sex) = unique(info.samples$Sex)
+
+COLORS$Age_Disc = MetBrewer::met.brewer('Juarez', length(unique(info.samples$Age_Disc)))
+names(COLORS$Age_Disc) = unique(info.samples$Age_Disc)
+
+COLORS$Location_Broad = MetBrewer::met.brewer('Juarez', length(unique(info.samples$Location_Broad)))
+names(COLORS$Location_Broad) = unique(info.samples$Location_Broad)
+
+COLORS$H3K27me3 = MetBrewer::met.brewer('Juarez', length(unique(info.samples$H3K27me3)))
+names(COLORS$H3K27me3) = unique(info.samples$H3K27me3)
+
+COLORS$Type = MetBrewer::met.brewer('Juarez', length(unique(info.samples$Type)))
+names(COLORS$Type) = unique(info.samples$Type)
+```
+
+# Full Data 
+
+## Group
+
+```{r}
+for(i in 1:4){
+  pca_plot(pca.10000, COLORS, info.samples, lab = T, pca.cont = pca.cont, PC_1 = paste0('PC', i), PC_2 = paste0('PC', i+1), title = '', color_by = 'Type')  %>% print
+}
+```
+
+```{r}
+for(i in 1:4){
+  pca_plot(pca.10000, COLORS, info.samples, lab = T, pca.cont = pca.cont, PC_1 = paste0('PC', i), PC_2 = paste0('PC', i+1), title = '', color_by = 'Group')  %>% print
+}
+```
+
+
+## Sex
+
+
+
+```{r}
+for(i in 1:4){
+  pca_plot(pca.10000, COLORS, info.samples, lab = T, pca.cont = pca.cont, PC_1 = paste0('PC', i), PC_2 = paste0('PC', i+1), title = '', color_by = 'Sex')  %>% print
+}
+```
+
+
+## Age 
+
+
+
+```{r}
+for(i in 1:4){
+  pca_plot(pca.10000, COLORS, info.samples, lab = T, pca.cont = pca.cont, PC_1 = paste0('PC', i), PC_2 = paste0('PC', i+1), title = '', color_by = 'Age_Disc')  %>% print
+}
+```
+
+
+
+## Location   
+
+
+
+```{r}
+for(i in 1:4){
+  pca_plot(pca.10000, COLORS, info.samples, lab = T, pca.cont = pca.cont, PC_1 = paste0('PC', i), PC_2 = paste0('PC', i+1), title = '', color_by = 'Location_Broad')  %>% print
+}
+```
+
+
+

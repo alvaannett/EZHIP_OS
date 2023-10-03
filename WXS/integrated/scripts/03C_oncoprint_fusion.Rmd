@@ -1,0 +1,154 @@
+---
+title: "Oncoprint"
+output: 
+  html_document:
+    df_print: paged
+    theme: flatly
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+```{r}
+library(tidyverse)
+library(ComplexHeatmap)
+```
+
+```{r}
+PATH_FUSOIN = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/integrated/221106_oncoprint/out/01_concat/fusions_final.tsv"
+PATH_META_SAMPLE = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/files/sample_meta.tsv"
+PATH_META_PATIENT = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/files/patient_meta.tsv"
+OUT = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/integrated/221106_oncoprint/out/03_oncoprint_fusion/"
+```
+
+```{r}
+fusion = data.table::fread(PATH_FUSOIN) %>%
+         filter(!grepl("-MASS|-NOD|-MET|-THO", sample)) %>%
+         separate(sample, into = c('PATIENT', NA, 'RELAPSE'), sep = '_', remove = F) %>%
+         mutate(RELAPSE = ifelse(RELAPSE == 'T', '0T', RELAPSE), 
+               RELAPSE = ifelse(is.na(RELAPSE), '0T', RELAPSE)) %>%
+        filter(grepl("TP53|RB1|KMT2C|KDM6B|KDM6A", fusion_name)) 
+``` 
+
+```{r}
+keep = (fusion %>%
+  select(sample, PATIENT, RELAPSE) %>%
+  distinct() %>%
+  arrange(PATIENT, RELAPSE) %>%
+  group_by(PATIENT) %>%
+  top_n(wt = RELAPSE, n = -1))$sample
+
+
+fusion = fusion %>%
+  filter(sample %in% keep)
+```
+
+```{r}
+meta_pat = data.table::fread(PATH_META_PATIENT) 
+meta_samp = data.table::fread(PATH_META_SAMPLE)
+```
+
+```{r}
+meta = full_join(meta_samp, meta_pat, by = 'Patient_N') %>%
+       filter(!is.na(Patient_N)) %>%
+       mutate(Response = tolower(Response), 
+              Primary_location = tolower(Primary_location)) %>%
+       mutate(Sample_oncoprint = ifelse(is.na(ID_triceps_signature_profyle), RNA_ID_inhouse, ID_triceps_signature_profyle)) 
+
+meta = meta %>%
+       filter(Sample_oncoprint %in% intersect(fusion$PATIENT, meta$Sample_oncoprint))
+```
+
+```{r}
+df = rbind(fusion %>% 
+  inner_join(meta,  by = c('PATIENT' = 'ID_triceps_signature_profyle')) %>%
+  select(Patient_N, fusion_name), 
+fusion %>% 
+  inner_join(meta,  by = c('sample' = 'RNA_ID_inhouse')) %>%
+  select(Patient_N, fusion_name))
+```
+
+
+```{r}
+df = df %>% 
+  mutate(variant = 'fusion') %>%
+  separate(fusion_name, into = c('gene1', 'gene2'), sep = "--") %>%
+  pivot_longer(-c(Patient_N, variant)) %>%
+  pivot_wider(names_from = Patient_N, 
+              values_from = variant, 
+              id_cols = value, 
+              values_fill = NA,
+              values_fn = list(variant = ~paste(., collapse = ";")))
+
+# add empty rows for samples not in matrix 
+if(length(setdiff(unique(fusion$Patient_N), colnames(df))) > 0){
+df[setdiff(unique(fusion$Patient_N), colnames(df))] = NA
+}
+```
+
+```{r}
+data.table::fwrite(df, paste0(OUT, "oncomat_fusion.tsv"))
+```
+
+
+```{r}
+genes = fusion %>% 
+  mutate(variant = 'fusion') %>%
+  select(sample, fusion_name, variant) %>%
+  separate(fusion_name, into = c('gene1', 'gene2'), sep = "--") %>%
+  pivot_longer(-c(sample, variant)) %>%
+  distinct(sample, value) %>%
+  count(value) %>%
+  arrange(desc(n)) %>%
+  filter(n > 2)
+
+df = df %>%
+  filter(value %in% genes$value) %>%
+  column_to_rownames('value')
+```
+
+```{r}
+col = c("fusion" = "darkgreen")
+
+alter_fun = list(
+  background = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = "#DEE3E3", col = NA))
+  },
+  
+  fusion = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = col["fusion"], col = NA))
+  }
+)
+```
+
+```{r}
+op = oncoPrint(df,
+               alter_fun = alter_fun,
+               col = col, 
+               pct_side = "right", 
+               row_names_side = "left", 
+               remove_empty_columns = F, 
+               show_column_names = T, 
+               right_annotation=NULL, 
+               top_annotation = NULL, 
+               row_names_gp = gpar(fontsize = 10),
+               column_names_gp = gpar(fontsize = 10), 
+               width = ncol(df)*unit(5, "mm"), 
+               height = nrow(df)*unit(5, "mm"))
+
+```
+```{r}
+pdf(paste0(OUT, "oncoprint_fusion.pdf"))
+draw(op)
+dev.off()
+```
+
+
+```{r}
+fusion %>% filter(grepl('^TP53-|-TP53$', fusion_name))
+fusion %>% filter(grepl('^TP53I11-|-TP53I11$', fusion_name))
+```
+

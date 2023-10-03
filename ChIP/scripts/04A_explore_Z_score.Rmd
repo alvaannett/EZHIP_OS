@@ -1,0 +1,913 @@
+---
+title: "Z-score EZHIP U2OS K27me3"
+output:
+  html_document:
+    df_print: paged
+    theme: flatly
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+```{r}
+knitr::opts_chunk$set(echo=FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(GenomicRanges)
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(DOSE)
+library(msigdbr)
+library(enrichplot)
+library(ggrepel)
+library(ggsignif)
+library(ggbreak)
+```
+
+```{r}
+run_GSEA = function(gene_list, pval=0.05, cat, subcat=NA, minset=10){
+
+  set.seed(321)
+
+  #TERM2GENE
+  term2gene = msigdbr(species = "human", category = cat, subcategory = subcat) %>%          
+                      dplyr::select(c("gs_name", "human_ensembl_gene"))
+  #TERM2NAME
+  term2name = msigdbr(species = "human", category = cat, subcategory = subcat) %>%          
+                      dplyr::select(c("gs_name", "gs_description"))
+  #run gsea
+  gse = GSEA(gene_list,
+             minGSSize = minset,
+             maxGSSize = 500,
+             pvalueCutoff = pval,
+             pAdjustMethod = "BH",
+             TERM2GENE = term2gene,
+             verbose = TRUE,
+             seed = TRUE)
+
+  gse=setReadable(gse,
+                  OrgDb = org.Hs.eg.db,
+                  keyType = "ENSEMBL")
+  return(gse)
+}
+
+run_ORA = function(gene_list, pval=0.1, cat, subcat=NA, background, minset = 5){
+
+  #TERM2GENE
+  term2gene = msigdbr(species = "human", category = cat, subcategory = subcat) %>%          
+                      dplyr::select(c("gs_name", "human_ensembl_gene"))
+
+  #TERM2NAME
+  term2name = msigdbr(species = "human", category = cat, subcategory = subcat) %>%          
+                      dplyr::select(c("gs_name", "gs_description"))
+
+  #run ora
+  ora = enricher(gene_list,
+             pvalueCutoff = pval,
+             pAdjustMethod = "BH",
+              minGSSize = minset,
+             universe = background,
+             TERM2GENE = term2gene)
+
+  ora=setReadable(ora,
+                  OrgDb = org.Hs.eg.db,
+                  keyType = "ENSEMBL")
+  return(ora)
+}
+
+wf_plot_gsea = function(term){
+  hl = out %>%
+  as.data.frame() %>%
+  arrange(NES) %>%
+  mutate(rank = seq.int(nrow(out)),
+         hl = ifelse(grepl(term, Description), T, F)) %>%
+  filter(hl == T)
+
+p1 = out %>%
+  as.data.frame() %>%
+  arrange(NES) %>%
+  mutate(rank = seq.int(nrow(out))) %>%
+  ggblanket::gg_point(NES, rank, size = 2, color = 'grey') +
+  geom_point(data = hl,
+             aes(NES, rank),
+             color='red',
+             size=4) +
+  xlab('NES') +
+  annotate(geom="text", x=-1, y=50, label=term,
+              color="red") +
+  theme(axis.title.y = element_blank()) +
+  scale_y_reverse()
+
+  print(p1)
+}
+
+
+wf_plot_gene = function(genes, anno){
+  hl = z_score %>%
+  as.data.frame() %>%
+  arrange(Z_k27me3) %>%
+  filter(id %in% genes)
+
+
+z_score %>%
+  as.data.frame() %>%
+  arrange(Z_k27me3) %>%
+  mutate(rank = seq.int(length(z_score))) %>%
+  filter(abs(Z_k27me3) >= 0) %>%
+  ggplot(aes(Z_k27me3, rank)) +
+  geom_point(size = 2, color = 'grey') +
+  geom_point(data = hl, aes(Z_k27me3, rank), color='red', size=4) +
+  xlab('Z-score') +
+  annotate(geom="text", x=2, y=10000, label=anno, size = 10,
+              color="red") +
+  theme_bw() +
+  theme(text = element_text(size = 25),
+        axis.title = element_blank(),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  scale_y_reverse() +
+  geom_vline(xintercept = c(-1, 1), linetype="dotted",
+                color = "red", size=1)
+}
+```
+
+```{r}
+PATH_Z_SCORE = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/ChIP/U2OS/out/03_sndeeptools/07_z_score/RPKM.scale_1.bed_promoter5kb.ens.hg19.EZHIP.z_score.tab"
+GENE_ANO = "/lustre06/project/6004736/alvann/from_narval/REFERENCES/annotation_files/hg19/Ensembl.ensGene.whole.hg19.collapsed.bed"
+PROMOTER_ANO = "/lustre06/project/6004736/alvann/from_narval/REFERENCES/annotation_files/hg19/Ensembl.ensGene.whole.hg19.collapsed.promoter5kb.bed"
+DEG = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/U2OS/out/01_raptor_exprtools/EZHIP_minus_C77_C2/diff/Ensembl.ensGene.exon/EZHIP_KOvsEZHIP.tsv"
+COUNTS = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/U2OS/out/01_raptor_exprtools/EZHIP_minus_C77_C2/counts/Ensembl.ensGene.exon.norm.tsv.gz"
+OUT = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/ChIP/U2OS/out/04_Z_score_figures/"
+```
+
+```{r}
+genes = read.csv(GENE_ANO,
+                 sep="\t",
+                 header = F) %>%
+  magrittr::set_colnames(c("chr", "start", "end", "ENS", "score", "strand")) %>%
+  select(-c(score))
+
+genes = makeGRangesFromDataFrame(genes,
+                                 seqnames.field="chr",
+                                 start.field="start",
+                                 end.field="end",
+                                 strand.field="strand",
+                                 keep.extra.columns = T)
+
+genes = keepSeqlevels(genes, value = standardChromosomes(genes)[-25], pruning.mode="coarse")
+```
+
+```{r}
+promoter = read.csv(PROMOTER_ANO,
+                 sep="\t",
+                 header = F) %>%
+  magrittr::set_colnames(c("chr", "start", "end", "ENS", "score", "strand")) %>%
+  select(-c(score))
+
+
+promoter = makeGRangesFromDataFrame(promoter,
+                                 seqnames.field="chr",
+                                 start.field="start",
+                                 end.field="end",
+                                 strand.field="strand",
+                                 keep.extra.columns = T)
+
+promoter = keepSeqlevels(promoter, value = standardChromosomes(promoter)[-25], pruning.mode="coarse")
+```
+
+```{r}
+z_score = data.table::fread(PATH_Z_SCORE)
+
+z_score = z_score %>% makeGRangesFromDataFrame(keep.extra.columns = T, seqnames.field = 'chr', end.field = 'end', start.field = 'start')
+
+z_score = keepSeqlevels(z_score, value = standardChromosomes(genes)[-25], pruning.mode="coarse")
+z_score
+```
+
+```{r}
+hits = findOverlaps(z_score, promoter, type = "equal")
+z_score = z_score[queryHits(hits)]
+z_score$ENS = promoter[subjectHits(hits)]$ENS
+z_score$ENS %>% unique() %>% length()
+z_score
+```
+
+```{r}
+deg = data.table::fread(DEG) %>%
+  separate(ID, into = c('ENS', 'SYM'), sep = ':') %>%
+  mutate(RNA_change = ifelse(padj < 0.05 & log2FoldChange > 1 & baseMean > 100, 'gain', 'no change')) %>%
+  mutate(RNA_change = ifelse(padj < 0.05 & log2FoldChange < -1 & baseMean > 100, 'loss', RNA_change))
+```
+
+```{r}
+counts = data.table::fread(COUNTS) %>% rename(ID = V1)
+```
+
+Number of bins with a significnat change abs(z-score) > 2
+
+```{r}
+df = z_score %>%
+  as.data.frame() %>%
+  filter(abs(Z_H3K27me3) > 1) %>%
+  mutate(change = ifelse(Z_H3K27me3 > 0, 'gain', 'loss')) %>%
+  count(change)
+
+data.table::fwrite(df, file = paste0(OUT, 'N_change_z_score.txt'))
+
+ggplot(df, aes(x = change, y = n)) +
+  geom_bar(color = 'steelblue', fill = 'steelblue', stat = 'identity') +
+  theme_bw() +
+  theme(text = element_text(size = 25),
+        axis.title = element_blank(),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank())
+```
+
+```{r}
+dens = z_score %>%
+  as.data.frame() %>%
+  na.omit() %>%
+  ggplot(aes(x = Z_H3K27me3)) +
+  geom_density(color = 'black', fill = 'steelblue', alpha = 0.5) +
+  theme_bw() +
+  theme(text = element_text(size = 20),
+        axis.title = element_blank(),
+        axis.line.y = element_line(size = 0.5),
+        axis.line.x = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank())
+dens
+```
+
+```{r}
+dens = deg %>%
+  ggplot(aes(x = log2FoldChange)) +
+  geom_density(color = 'black', fill = 'steelblue', alpha = 0.5) +
+  theme_bw() +
+  theme(text = element_text(size = 20),
+        axis.title = element_blank(),
+        axis.line.y = element_line(size = 0.5),
+        axis.line.x = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank())
+dens
+```
+
+# Integrate with transcriptpome
+
+```{r}
+df = full_join(z_score %>% as.data.frame(), deg, by = c('ENS' = 'ENS'))
+
+p1 = ggplot(df, aes(x = Z_H3K27me3, y = log2FoldChange)) +
+  geom_point(color = 'lightgrey') +
+  geom_point(data = right_join(z_score %>% as.data.frame() %>% filter(Z_H3K27me3 < -1), deg %>% filter(RNA_change == 'gain'), by = c('ENS' = 'ENS') ),
+             aes(Z_H3K27me3, log2FoldChange), color = '#F46036', inherit.aes = F, alpha = 0.7) +
+  geom_point(data = right_join(z_score %>% as.data.frame() %>% filter(Z_H3K27me3 > 1), deg %>% filter(RNA_change == 'loss'), by = c('ENS' = 'ENS')),
+             aes(Z_H3K27me3, log2FoldChange), color = '#28666E', inherit.aes = F, alpha = 0.7) +
+  theme_bw() +
+  theme(text = element_text(size = 20),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank()) +
+  geom_hline(yintercept = c(-1, 1), linetype="dotted",
+                color = "red", size=0.7) +
+  geom_vline(xintercept = c(-1, 1), linetype="dotted",
+                color = "red", size=0.7) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank()) +
+  xlab('H3K27me3') +
+  ylab('RNA')
+
+p1
+```
+
+```{r}
+lable_genes_up = c((full_join(z_score %>% as.data.frame(), deg, by = c('ENS' = 'ENS')) %>%
+                    filter(!grepl("^RP|^LINC|^AC0", SYM)) %>%
+               filter(RNA_change == 'gain' & Z_H3K27me3 < -1) %>%
+               top_n(wt = Z_H3K27me3, n = -10))$SYM)
+
+lable_genes_down = (full_join(z_score %>% as.data.frame(), deg, by = c('ENS' = 'ENS')) %>%
+                        filter(!grepl("^RP|^LINC|^AC0", SYM)) %>%
+               filter(RNA_change == 'loss' & Z_H3K27me3 > 1) %>%
+               top_n(wt = Z_H3K27me3, n = 10))$SYM
+
+df = full_join(z_score %>% as.data.frame(), deg, by = c('ENS' = 'ENS')) %>%
+     mutate(SYM_label = ifelse(SYM %in% c(lable_genes_up, lable_genes_down, "PAX7"), SYM, NA)) 
+
+p2 = ggplot(df, aes(x = Z_H3K27me3, y = log2FoldChange, label = SYM_label)) +
+  geom_point(color = 'lightgrey') +
+  geom_point(data = right_join(z_score %>% as.data.frame() %>% filter(Z_H3K27me3 < -1), deg %>% filter(RNA_change == 'gain'), by = c('ENS' = 'ENS') ),
+             aes(Z_H3K27me3, log2FoldChange), color = '#F46036', inherit.aes = F, alpha = 0.7) +
+  geom_point(data = right_join(z_score %>% as.data.frame() %>% filter(Z_H3K27me3 > 1), deg %>% filter(RNA_change == 'loss'), by = c('ENS' = 'ENS')),
+             aes(Z_H3K27me3, log2FoldChange), color = '#28666E', inherit.aes = F, alpha = 0.7) +
+  geom_text_repel(show.legend = F, box.padding = 0.5, max.overlaps = Inf,   label.size = 0.15) +
+  theme_bw() +
+  theme(text = element_text(size = 20),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank()) +
+  geom_hline(yintercept = c(-1, 1), linetype="dotted",
+                color = "red", size=0.7) +
+  geom_vline(xintercept = c(-1, 1), linetype="dotted",
+                color = "red", size=0.7) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank()) +
+  xlab('H3K27me3') +
+  ylab('RNA')  +
+  coord_cartesian(xlim = c(-10, 10), ylim = c(-15, 15))
+
+p2
+```
+
+```{r}
+pdf(file = paste0(OUT, 'U2OS_expression_vs_H3K27me3.pdf'), width = 7, height = 5)
+p1
+dev.off()
+
+pdf(file = paste0(OUT, 'U2OS_expression_vs_H3K27me3_top_genes_annotated.pdf'), width = 7, height = 5)
+p2
+dev.off()
+```
+
+## Violin
+
+```{r}
+df = full_join(z_score %>% as.data.frame(), deg, by = c('ENS' = 'ENS')) %>%
+  filter(!RNA_change == "no change") %>%
+  mutate(RNA_change = factor(RNA_change, levels = c('gain', 'loss')))
+
+data.table::fwrite(df, file = paste0(OUT, 'Z_score_up_down_exp.txt'))
+
+violin = df %>%
+  ggplot(aes(RNA_change, Z_H3K27me3, fill = RNA_change)) +
+  geom_violin(alpha = 0.9) +
+  scale_fill_manual(values = c('#F46036', '#28666E'), name = 'Expression') +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = 'none') +
+  stat_summary(fun.y="mean", color="black", shape=18, size = 1) +
+  geom_signif(comparisons = list(c("gain", "loss")), map_signif_level=TRUE, textsize = 5, y_position = 17, test = 'wilcox.test') +
+  ylab('H3K27me3') +
+  coord_cartesian(ylim = c(-8, 19))
+
+violin
+```
+
+```{r}
+pdf(paste(OUT, 'U2OS_gene_expression_violins.pdf'), width = 4, height = 5)
+violin
+dev.off()
+```
+
+```{r}
+p1 = full_join(z_score %>% as.data.frame(), deg, by = c('ENS' = 'ENS')) %>%
+     mutate(base_mean_level = ifelse(baseMean > 100, 'high', 'low'),
+            H3K27me3_change = ifelse(Z_H3K27me3 > 1, 'gain', 'no'),
+            H3K27me3_change = ifelse(Z_H3K27me3 < -1, 'loss', H3K27me3_change)) %>%
+  count(base_mean_level, H3K27me3_change) %>%
+  na.omit() %>%
+  ggplot(aes(base_mean_level, n, fill = H3K27me3_change)) +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_fill_manual(values = c('red', 'blue', 'lightgrey'), name = 'H3K27me3') +
+  geom_bar(stat = 'identity', width = 0.7, position = position_dodge(width = 0.8), alpha = 0.8) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.title.y = element_blank()) +
+  xlab('Base Expression')
+
+p1
+```
+
+```{r}
+pdf(paste(OUT, 'change_H3K27me3_low_high_expressing_genes.pdf'), width = 4, height = 4)
+p1
+dev.off()
+```
+
+```{r}
+p1 = full_join(z_score %>% as.data.frame(), deg, by = c('ENS' = 'ENS')) %>%
+     mutate(base_mean_level = ifelse(baseMean > 100, 'high', 'low'),
+            H3K27me3_change = ifelse(Z_H3K27me3 > 1, 'gain', 'no change'),
+            H3K27me3_change = ifelse(Z_H3K27me3 < -1, 'loss', H3K27me3_change)) %>%
+  count(base_mean_level, H3K27me3_change) %>%
+  mutate(H3K27me3= factor(H3K27me3_change, levels = c('gain', 'loss', 'no change'))) %>%
+  na.omit() %>%
+  ggplot(aes(base_mean_level, n, fill = H3K27me3)) +
+  scale_fill_manual(values = c('#F46036', '#28666E', 'lightgrey'), name = 'H3K27me3') +
+  geom_bar(stat = 'identity', width = 0.7, position = 'fill', alpha = 0.8) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.title.y = element_blank()) +
+  xlab('Base Expression') +
+  scale_y_continuous(labels = scales::percent_format(), expand = c(0,0)) 
+
+p1
+```
+
+```{r}
+pdf(paste(OUT, 'change_H3K27me3_low_high_expressing_genes.proportion.pdf'), width = 4, height = 4)
+p1
+dev.off()
+```
+
+```{r}
+save = full_join(z_score %>% as.data.frame(), deg, by = c('ENS' = 'ENS')) %>%
+     mutate(base_mean_level = ifelse(baseMean > 100, 'high', 'low'),
+            H3K27me3_change = ifelse(Z_H3K27me3 > 1, 'gain', 'no change'),
+            H3K27me3_change = ifelse(Z_H3K27me3 < -1, 'loss', H3K27me3_change)) 
+
+save 
+
+data.table::fwrite(save, file = paste0(OUT, 'change_rna_H3K27me3_all_genes.txt'))
+```
+
+```{r}
+ full_join(z_score %>% as.data.frame(), deg, by = c('ENS' = 'ENS')) %>%
+     mutate(base_mean_level = ifelse(baseMean > 100, 'high', 'low'),
+            H3K27me3_change = ifelse(Z_H3K27me3 > 1, 'gain', 'no change'),
+            H3K27me3_change = ifelse(Z_H3K27me3 < -1, 'loss', H3K27me3_change)) %>%
+  mutate(H3K27me3= factor(H3K27me3_change, levels = c('no change', 'gain', 'loss'))) %>%
+  mutate(RNA = factor(RNA_change, levels = c('no change', 'gain', 'loss'))) %>%
+  select(H3K27me3, RNA, base_mean_level) %>%
+  na.omit() %>%
+  count(base_mean_level, H3K27me3, RNA) %>%
+  ggplot(aes(base_mean_level, n, fill = RNA)) +
+  scale_fill_manual(values = c('no change' = 'lightgrey', 'gain' = 'red', 'loss' = 'blue')) +
+  geom_bar(stat = 'identity', width = 0.7, position = 'fill', alpha = 0.8) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.title.y = element_blank()) +
+  scale_y_continuous(labels = scales::percent_format()) +
+    scale_y_continuous(expand = c(0,0)) 
+```
+
+```{r}
+p1 = full_join(z_score %>% as.data.frame(), deg, by = c('ENS' = 'ENS')) %>%
+     mutate(base_mean_level = ifelse(baseMean > 100, 'high', 'low'),
+            H3K27me3_change = ifelse(Z_H3K27me3 > 1, 'gain', 'no change'),
+            H3K27me3_change = ifelse(Z_H3K27me3 < -1, 'loss', H3K27me3_change)) %>%
+  mutate(H3K27me3= factor(H3K27me3_change, levels = c('gain', 'loss', 'no change'))) %>%
+  mutate(RNA = factor(RNA_change, levels = c('no change', 'gain', 'loss'))) %>%
+  select(H3K27me3, RNA, base_mean_level) %>%
+  na.omit() %>%
+  count(H3K27me3, RNA) %>%
+  ggplot(aes(H3K27me3, n, fill = RNA)) +
+  scale_fill_manual(values = c('gain' = '#F46036', 'loss' = '#28666E', 'no change' = 'lightgrey')) +
+  geom_bar(stat = 'identity', width = 0.7, position = 'fill', alpha = 0.9) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.title.y = element_blank(), 
+        axis.title.x = element_text(size = 15)) +
+    scale_y_cut(breaks=c(0.07)) +
+    scale_y_continuous(labels = scales::percent_format()) 
+p1
+```
+```{r}
+pdf(paste0(OUT, 'change_rna_H3K27me3_bar.pdf'), width = 5, height = 4, onefile = F)
+p1
+dev.off()
+```
+
+
+```{r}
+full_join(z_score %>% as.data.frame(), deg, by = c('ENS' = 'ENS')) %>%
+     mutate(base_mean_level = ifelse(baseMean > 100, 'high', 'low'),
+            H3K27me3_change = ifelse(Z_H3K27me3 > 1, 'gain', 'no'),
+            H3K27me3_change = ifelse(Z_H3K27me3 < -1, 'loss', H3K27me3_change),
+            RNA_change = ifelse(log2FoldChange > 1, 'gain', 'no'),
+            RNA_change = ifelse(log2FoldChange < -1, 'loss', RNA_change)) %>% View()
+```
+
+
+# Gene sets
+
+## ORA loss
+
+### 0.5%
+
+```{r}
+gs = (full_join(z_score %>% as.data.frame(), deg, by = c('ENS' = 'ENS')) %>% filter(log2FoldChange > 1 & Z_H3K27me3 < -1))$ENS
+```
+
+```{r}
+out = run_ORA(gene_list = gs, pval = 0.05, cat="H")
+out %>% as.data.frame()
+```
+
+```{r}
+out = run_ORA(gene_list = gs, pval = 0.05, cat="C5", subcat = 'BP')
+out %>% as.data.frame()
+```
+
+
+# Plot summary bed/bin
+
+```{r}
+path='/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/ChIP/U2OS/out/03_sndeeptools/02_bigwig_summary_bed/avrage_bed.CPM.scale_1.bed_promoter5kb.ens.hg19.tab'
+
+bin = data.table::fread(path)
+names(bin) = str_remove_all(names(bin), "'|#")
+bin = bin %>%
+  dplyr::select(!c(chr, start, end))
+
+pca = prcomp(bin %>% t)
+
+var = tibble(PC = factor(1:length(pca$sdev^2)), 
+                         variance = pca$sdev) %>% 
+  mutate(pct = variance/sum(variance)*100)
+
+pca$x %>%
+   as_tibble(rownames = "sample") %>%
+   separate(sample, into = c('sample'), sep = '[.]', remove = F) %>%
+   mutate(group = ifelse(grepl('54', sample), 'EZHIP KO', 'EZHIP')) %>%
+   ggplot(aes(x=PC1, y=PC2, color = group, label = sample)) +
+  scale_color_manual(values = c('red', 'blue')) +
+    geom_point(size = 4) +
+  ggrepel::geom_text_repel(show.legend	= F, box.padding = 0.5, max.overlaps = Inf, color="black" ) +
+    theme_bw() +
+    theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank()) + 
+  xlab(paste0("PC1 ", round(var[1,]$pct, digits = 1), '%')) +
+  ylab(paste0("PC2 ", round(var[2,]$pct, digits = 1), '%'))
+
+pca_plot = pca$x %>%
+   as_tibble(rownames = "sample") %>%
+   separate(sample, into = c('sample'), sep = '[.]', remove = F) %>%
+   mutate(group = ifelse(grepl('54', sample), 'EZHIP KO', 'EZHIP')) %>%
+   ggplot(aes(x=PC1, y=PC2, color = group)) +
+  scale_color_manual(values = c('red', 'blue')) +
+    geom_point(size = 4) +
+    theme_bw() +
+    theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank()) + 
+  xlab(paste0("PC1 ", round(var[1,]$pct, digits = 1), '%')) +
+  ylab(paste0("PC2 ", round(var[2,]$pct, digits = 1), '%'))
+
+pdf(paste0(OUT, 'genes.pca.pdf'), height = 4, width = 6) 
+pca_plot
+dev.off()
+```
+
+```{r}
+names(bin) = as.character((as.data.frame(str_split(names(bin), pattern =  '[.]'))[1,]))
+p1 = bin %>%
+  pivot_longer(everything(), values_to = 'score', names_to = 'sample') %>%
+  group_by(sample) %>%
+  slice_max(order_by = score, prop = 0.01) %>%
+  summarise(mean = mean(score)) %>%
+  mutate(group = ifelse(grepl('54', sample), 'EZHIP KO', 'EZHIP')) %>%
+  mutate(group = factor(group, levels = c('EZHIP KO', 'EZHIP'))) %>%
+  ungroup %>%
+  ggplot(aes(x = group, y = mean, color = group)) +
+  geom_point() +
+  scale_color_manual(values = c('blue', 'red')) +
+  geom_point(size = 4, alpha = 0.8) +
+  stat_summary(fun.y=mean, geom="crossbar", color="black", width = 0.1) +
+  coord_cartesian(ylim = c(0, 9)) +
+  theme_bw() +
+  theme(text = element_text(size = 20),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank(),  
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_blank(), legend.position = 'none') +
+  geom_signif(comparisons = list(c("EZHIP KO", "EZHIP")), map_signif_level=F, textsize = 5, y_position = 8, test = 't.test', color = 'black') +
+  ylab("Top 1% promoter score")
+
+p1
+pdf(paste0(OUT, 'top_promoters_avrage_enrich.pdf'), height = 4, width = 3) 
+p1
+dev.off()
+```
+
+```{r}
+path='/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/ChIP/U2OS/out/03_sndeeptools/02_bigwig_summary_bin/avrage_bin.RPKM.scale_1.bin_5000.tab'
+
+bin = data.table::fread(path)
+names(bin) = str_remove_all(names(bin), "'|#")
+bin = bin %>%
+  select(!c(chr, start, end))
+
+pca = prcomp(bin %>% t)
+
+var = tibble(PC = factor(1:length(pca$sdev^2)), 
+                         variance = pca$sdev) %>% 
+  mutate(pct = variance/sum(variance)*100)
+
+pca$x %>%
+   as_tibble(rownames = "sample") %>%
+   separate(sample, into = c('sample'), sep = '[.]', remove = F) %>%
+   mutate(group = ifelse(grepl('54', sample), 'EZHIP KO', 'EZHIP')) %>%
+   ggplot(aes(x=PC1, y=PC2, color = group, label = sample)) +
+  scale_color_manual(values = c('red', 'blue')) +
+    geom_point(size = 4) +
+  ggrepel::geom_text_repel(show.legend	= F, box.padding = 0.5, max.overlaps = Inf, color="black" ) +
+    theme_bw() +
+    theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank()) + 
+  xlab(paste0("PC1 ", round(var[1,]$pct, digits = 1), '%')) +
+  ylab(paste0("PC2 ", round(var[2,]$pct, digits = 1), '%'))
+
+pca_plot = pca$x %>%
+   as_tibble(rownames = "sample") %>%
+   separate(sample, into = c('sample'), sep = '[.]', remove = F) %>%
+   mutate(group = ifelse(grepl('54', sample), 'EZHIP KO', 'EZHIP')) %>%
+   ggplot(aes(x=PC1, y=PC2, color = group)) +
+  scale_color_manual(values = c('red', 'blue')) +
+    geom_point(size = 4) +
+    theme_bw() +
+    theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank()) + 
+  xlab(paste0("PC1 ", round(var[1,]$pct, digits = 1), '%')) +
+  ylab(paste0("PC2 ", round(var[2,]$pct, digits = 1), '%'))
+
+
+pdf(paste0(OUT, '5kb_bins.pca.pdf'), height = 4, width = 6) 
+pca_plot
+dev.off()
+```
+
+```{r}
+path='/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/ChIP/U2OS/out/03_sndeeptools/02_bigwig_summary_bin/avrage_bin.CPM.scale_1.bin_5000.tab'
+
+bin = data.table::fread(path)
+names(bin) = str_remove_all(names(bin), "'|#")
+bin = bin %>%
+  select(!c(chr, start, end))
+
+pca = prcomp(bin %>% t)
+
+var = tibble(PC = factor(1:length(pca$sdev^2)), 
+                         variance = pca$sdev) %>% 
+  mutate(pct = variance/sum(variance)*100)
+
+pca$x %>%
+   as_tibble(rownames = "sample") %>%
+   separate(sample, into = c('sample'), sep = '[.]', remove = F) %>%
+   mutate(group = ifelse(grepl('54', sample), 'EZHIP KO', 'EZHIP')) %>%
+   ggplot(aes(x=PC1, y=PC2, color = group, label = sample)) +
+  scale_color_manual(values = c('red', 'blue')) +
+    geom_point(size = 4) +
+  ggrepel::geom_text_repel(show.legend	= F, box.padding = 0.5, max.overlaps = Inf, color="black" ) +
+    theme_bw() +
+    theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank()) + 
+  xlab(paste0("PC1 ", round(var[1,]$pct, digits = 1), '%')) +
+  ylab(paste0("PC2 ", round(var[2,]$pct, digits = 1), '%'))
+
+pca_plot = pca$x %>%
+   as_tibble(rownames = "sample") %>%
+   separate(sample, into = c('sample'), sep = '[.]', remove = F) %>%
+   mutate(group = ifelse(grepl('54', sample), 'EZHIP KO', 'EZHIP')) %>%
+   ggplot(aes(x=PC1, y=PC2, color = group)) +
+  scale_color_manual(values = c('red', 'blue')) +
+    geom_point(size = 4) +
+    theme_bw() +
+    theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank()) + 
+  xlab(paste0("PC1 ", round(var[1,]$pct, digits = 1), '%')) +
+  ylab(paste0("PC2 ", round(var[2,]$pct, digits = 1), '%'))
+
+
+pdf(paste0(OUT, '5kb_bins.pca.pdf'), height = 4, width = 6) 
+pca_plot
+dev.off()
+```
+
+
+```{r}
+names(bin) = as.character((as.data.frame(str_split(names(bin), pattern =  '[.]'))[1,]))
+bin %>%
+  pivot_longer(everything(), values_to = 'score', names_to = 'sample') %>%
+  group_by(sample) %>%
+  slice_max(order_by = score, prop = 0.01) %>%
+  summarise(mean = mean(score)) %>%
+  mutate(group = ifelse(grepl('54', sample), 'EZHIP KO', 'EZHIP')) %>%
+  ungroup %>%
+  ggplot(aes(x = group, y = mean, color = group)) +
+  geom_point() +
+  scale_color_manual(values = c('red', 'blue')) +
+  geom_point(size = 3, alpha = 0.8) +
+  stat_summary(fun.y=mean, geom="crossbar", color="black", width = 0.2) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank(), 
+        axis.title = element_blank(), 
+        axis.title.x = element_blank(), legend.position = 'none') +
+  geom_signif(comparisons = list(c("EZHIP KO", "EZHIP")), map_signif_level=TRUE, textsize = 5, test = 't.test', color = 'black') 
+```
+
+```{r}
+path='/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/ChIP/U2OS/out/03_sndeeptools/02_bigwig_summary_bed/avrage_bed.RPKM.scale_1.bed_cgi.3kb.UCSC.hg19.tab'
+
+bin = data.table::fread(path)
+names(bin) = str_remove_all(names(bin), "'|#")
+bin = bin %>%
+  select(!c(chr, start, end))
+
+pca = prcomp(bin %>% t)
+
+var = tibble(PC = factor(1:length(pca$sdev^2)), 
+                         variance = pca$sdev) %>% 
+  mutate(pct = variance/sum(variance)*100)
+
+pca$x %>%
+   as_tibble(rownames = "sample") %>%
+   separate(sample, into = c('sample'), sep = '[.]', remove = F) %>%
+   mutate(group = ifelse(grepl('54', sample), 'EZHIP KO', 'EZHIP')) %>%
+   ggplot(aes(x=PC1, y=PC2, color = group, label = sample)) +
+  scale_color_manual(values = c('red', 'blue')) +
+    geom_point(size = 4) +
+  ggrepel::geom_text_repel(show.legend	= F, box.padding = 0.5, max.overlaps = Inf, color="black" ) +
+    theme_bw() +
+    theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank()) + 
+  xlab(paste0("PC1 ", round(var[1,]$pct, digits = 1), '%')) +
+  ylab(paste0("PC2 ", round(var[2,]$pct, digits = 1), '%'))
+
+pca_plot = pca$x %>%
+   as_tibble(rownames = "sample") %>%
+   separate(sample, into = c('sample'), sep = '[.]', remove = F) %>%
+   mutate(group = ifelse(grepl('54', sample), 'EZHIP KO', 'EZHIP')) %>%
+   ggplot(aes(x=PC1, y=PC2, color = group)) +
+  scale_color_manual(values = c('red', 'blue')) +
+    geom_point(size = 4) +
+    theme_bw() +
+    theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank()) + 
+  xlab(paste0("PC1 ", round(var[1,]$pct, digits = 1), '%')) +
+  ylab(paste0("PC2 ", round(var[2,]$pct, digits = 1), '%'))
+
+pdf(paste0(OUT, 'genes.pca.pdf'), height = 4, width = 6) 
+pca_plot
+dev.off()
+```
+
+```{r}
+names(bin) = as.character((as.data.frame(str_split(names(bin), pattern =  '[.]'))[1,]))
+p1 = bin %>%
+  pivot_longer(everything(), values_to = 'score', names_to = 'sample') %>%
+  group_by(sample) %>%
+  slice_max(order_by = score, prop = 0.01) %>%
+  summarise(mean = mean(score)) %>%
+  mutate(group = ifelse(grepl('54', sample), 'EZHIP KO', 'EZHIP')) %>%
+  ungroup %>%
+  ggplot(aes(x = group, y = mean, color = group)) +
+  geom_point() +
+  scale_color_manual(values = c('red', 'blue')) +
+  geom_point(size = 3, alpha = 0.8) +
+  stat_summary(fun.y=mean, geom="crossbar", color="black", width = 0.1) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_blank(), 
+        axis.title = element_blank(), 
+        axis.title.x = element_blank(), legend.position = 'none') +
+  geom_signif(comparisons = list(c("EZHIP KO", "EZHIP")), map_signif_level=TRUE, textsize = 5, y_position = 8, test = 't.test', color = 'black') 
+
+#pdf(paste0(OUT, 'top_promoters_avrage_enrich.pdf'), height = 4, width = 3) 
+p1
+#dev.off()
+```
+
+# Desciles plot 
+
+
+```{r}
+deg = deg %>%
+  mutate(RNA_change = ifelse(padj < 0.05 & log2FoldChange > 1, 'gain', 'no change')) %>%
+  mutate(RNA_change = ifelse(padj < 0.05 & log2FoldChange < -1, 'loss', RNA_change))
+
+genes = (deg %>%filter(RNA_change %in% c('loss', 'gain')))$ENS
+
+counts %>% 
+  separate(ID, into = c('ENS', 'SYM'), sep = ':') %>% 
+  filter(ENS %in% genes) %>% 
+  mutate(mean = rowMeans(across(contains("C54")))) %>%
+  mutate(deciles = ntile(mean, 10)) %>%
+  arrange((deciles)) %>%
+  left_join(deg %>% filter(RNA_change %in% c('loss', 'gain')), by = c('ENS', 'SYM')) %>% 
+  mutate(RNA_change = factor(RNA_change, levels = c('gain', 'loss')),
+         deciles = paste0('D', deciles),
+         deciles = factor(deciles, levels = paste0('D', 1:10))) %>%
+  count(RNA_change, deciles, .drop = FALSE) %>% 
+  ggplot(aes(x = deciles, y = n, fill = RNA_change)) +
+  geom_bar(stat = 'identity',  width = 0.8, position = 'dodge', alpha = 0.9) +
+  scale_fill_manual(values = c('gain' = '#F46036', 'loss' = '#28666E', 'no change' = 'lightgrey'), name = 'RNA') +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.title.y = element_blank(), 
+        axis.title.x = element_text(size = 15)) +
+  scale_y_continuous(expand = c(0,0)) 
+```
+
+```{r}
+p = counts %>% 
+  separate(ID, into = c('ENS', 'SYM'), sep = ':') %>%
+  mutate(mean = rowMeans(across(contains("C54")))) %>%
+  mutate(exp_lev = ifelse(mean < 100, 'low', 'high')) %>%
+  left_join(deg, by = c('ENS', 'SYM')) %>% 
+  left_join(z_score %>% as.data.frame(), by = c('ENS' = 'ENS')) %>%
+     mutate(H3K27me3_change = ifelse(Z_H3K27me3 > 1, 'gain', 'no change'),
+            H3K27me3_change = ifelse(Z_H3K27me3 < -1, 'loss', H3K27me3_change)) %>%
+  select(exp_lev, H3K27me3_change) %>%
+  na.omit() %>%
+  count(exp_lev, H3K27me3_change) %>%
+  ggplot(aes(exp_lev, n, fill = H3K27me3_change)) +
+    scale_fill_manual(values = c('gain' = '#F46036', 'loss' = '#28666E', 'no change' = 'lightgrey'), name = 'H3K27me3') +
+  geom_bar(stat = 'identity', width = 0.7, position = 'fill', alpha = 0.9) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.title.y = element_blank()) +
+  scale_y_continuous(labels = scales::percent_format(), expand = c(0,0)) +
+  xlab('Expression Level')
+  
+p
+
+
+pdf(paste0(OUT, 'U2OS_high_vs_low_exp_genes_K27me3_change.pdf'), height = 5, width = 4)
+p
+dev.off()
+```
+

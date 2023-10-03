@@ -1,0 +1,5 @@
+counts_dir	star-custom-counts
+use_batch_correction	False
+feature_types	hg19.Ensembl.ensGene.exon
+genome	hg19
+levels_1_2_dir	/lustre06/project/6037386/data-kleinman/pipeline/v0/levels1-2/njabado/RNAseq/

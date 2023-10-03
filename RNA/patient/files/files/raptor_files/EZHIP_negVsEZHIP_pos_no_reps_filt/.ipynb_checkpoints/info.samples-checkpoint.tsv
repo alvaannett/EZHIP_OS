@@ -1,0 +1,8 @@
+ID	Nickname	Group	Batch	Patient_ID	Type	Patient_N	Primary_Location	Location_Broad	Sex	Age	Age_Disc	EZHIP_Intensity	EZHIP_Distribution	EZHIP_Localization	H3K27me3	Sample_Type	EZHIP Expression RNA	Filter reason	Include
+2022-09-14_clinical_OS_hg/20192009TB_B	PS_18_007707	EZHIP_neg	M	PS-18-007707	B	2	Right Distal Humerus	Arm	M	18	Adolecence	NA	NA	NA	Low	Resection Primary	Low		Yes
+2022-10-28_Clincal_RNA_OS_hg/TCMG171_OS_T	TCMG171_OS_T	EZHIP_neg	F	TCMG171	T	51	Left Proximal Humerus	Arm	F	13	Adolecence	NA	NA	NA	Low	Biopsy Primary	Low		Yes
+2022-10-28_Clincal_RNA_OS_hg/PRO-00035_OS_RE1	PRO00035_OS_RE1	EZHIP_neg	M	PRO00035	RE1	21	Right Femur	Leg	M	12	Adolecence	NA	NA	NA	NA	Biopsy Primary	Low		Yes
+2022-09-14_clinical_OS_hg/20182108JCG_c	AS_18_042734	EZHIP_neg	M	AS-18-042734	T	27	Left Proximal Humerus	Arm	M	70	Adult	NA	NA	NA	NA	Resection Primary	Low		Yes
+2022-10-28_Clincal_RNA_OS_hg/SISJ0577_OS_T	SISJ0577_OS_T	EZHIP_neg	F	SISJ0577	T	47	Left Femur	Leg	F	17	Adolecence	NA	NA	NA	NA	Biopsy Primary	Low		Yes
+2022-10-28_Clincal_RNA_OS_hg/TCMG238_OS_RE1	TCMG238_OS_RE1	EZHIP_neg	M	TCMG238	RE1	49	Left Mid and Distal Femur	Leg	M	16	Adolecence	NA	NA	NA	NA	Biopsy Primary	Low		Yes
+2022-12-20_clinical_OS_hg/S-12003_RNAseq-MUHC-7262-Frozen_S10	S12003	EZHIP_pos	M	S-12003	T	55	Left proximal thigh	Leg	M	35	Adult	strong	NA	nuclear	NA	Resection Primary	High		Yes

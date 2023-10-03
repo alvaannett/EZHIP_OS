@@ -1,0 +1,1363 @@
+---
+title: "Xgraft - GSEA and ORA Figures"
+output:
+  html_document:
+    df_print: paged
+    theme: flatly
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+```{r}
+library(xlsx)
+library(tidyverse)
+library(stringr)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(DOSE)
+library(msigdbr)
+library(enrichplot)
+library(ggrepel)
+library(ggpubr)
+library(ComplexHeatmap)
+library(circlize)
+```
+
+# KHOS Xgraft
+
+```{r, echo=TRUE}
+PATH = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/01_raptor_exprtools/KHOS/"
+PATH_GSEA_ORA = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/02_GSEA_ORA/KHOS/"
+COMP = "WTvsEZHIP"
+CELL = 'KHOS'
+```
+
+```{r}
+deg.khos = read.csv(paste(PATH, "diff/hg19.Ensembl.ensGene.exon/", COMP, '.tsv', sep=""), sep="\t")
+counts.khos = read.csv(paste(PATH, "counts/hg19.Ensembl.ensGene.exon.norm.tsv.gz", sep=""), sep="\t")
+```
+
+```{r}
+load(paste0(PATH_GSEA_ORA, CELL, '_', COMP, '.Rda'))
+```
+
+```{r}
+write.xlsx(GOBP %>% as.data.frame(), file=paste0(PATH_GSEA_ORA, "KHOS_xgraft_GSEA.xlsx"), sheetName="GOBP", row.names=FALSE)
+write.xlsx(Hall %>% as.data.frame(), file=paste0(PATH_GSEA_ORA, "KHOS_xgraft_GSEA.xlsx"), sheetName="HALLMARK", append=TRUE, row.names=FALSE)
+```
+
+```{r}
+Hall %>% as.data.frame()
+```
+
+
+```{r}
+p = (Hall_ora_up %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +Count), y = Count, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Hallmark')) +
+  coord_flip()
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_ORA_UP_Hallmark_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (Hall %>% as.data.frame())[1:20,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Hallmark')) +
+  coord_flip()
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_UP_Hallmark_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+
+
+
+```{r}
+p2 = gseaplot2(Hall,
+          geneSetID = c('KRAS_SIGNALING_UP', 'MYOGENESIS', 'EPITHELIAL_MESENCHYMAL_TRANSITION'), 
+          color = c('#337357', '#CD5334', '#FFB41F')) 
+p2
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_HALLMARK_GSEA_plot.pdf"), width = 7, height = 5)
+p2
+dev.off()
+```
+
+```{r}
+p = (GOBP_ora_up %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.01, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +Count), y = Count, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - GOBP')) +
+  coord_flip()
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_ORA_UP_GOBP_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+
+```{r}
+p = (dolgalev_atlas %>% as.data.frame())[1:14,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' Xeno - Dolgalev')) +
+  coord_flip() 
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Dolgalev_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (baryawno_atlas %>% as.data.frame())[1:15,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' Xeno - Baryawno')) +
+  coord_flip() +
+  scale_y_continuous(expand = c(0,0)) 
+  
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Baryawno_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (baccin_atlas %>% as.data.frame())[1:15,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' Xeno - Baccin')) +
+  coord_flip() +
+  scale_y_continuous(expand = c(0,0)) 
+  
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Baccin_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (zhang_atlas %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' Xeno - Zhang')) +
+  coord_flip() +
+  scale_y_continuous(expand = c(0,0)) 
+  
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Zhang_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+# MG63 Xgraft
+
+```{r, echo=TRUE}
+PATH = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/01_raptor_exprtools/MG63/"
+PATH_GSEA_ORA = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/xgrafts/out/02_GSEA_ORA/MG63/"
+COMP = "WTvsEZHIP"
+CELL = 'MG63'
+```
+
+```{r}
+deg.mg63 = read.csv(paste(PATH, "diff/hg19.Ensembl.ensGene.exon/", COMP, '.tsv', sep=""), sep="\t")
+counts.mg63 = read.csv(paste(PATH, "counts/hg19.Ensembl.ensGene.exon.norm.tsv.gz", sep=""), sep="\t")
+```
+
+```{r}
+load(paste0(PATH_GSEA_ORA, CELL, '_', COMP, '.Rda'))
+```
+
+```{r}
+p = (dolgalev_atlas %>% as.data.frame())[1:14,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' Xeno - Dolgalev')) +
+  coord_flip() 
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Dolgalev_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (baryawno_atlas %>% as.data.frame())[1:15,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' Xeno - Baryawno')) +
+  coord_flip() 
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Baryawno_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (baccin_atlas %>% as.data.frame())[1:15,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' Xeno - Baccin')) +
+  coord_flip() 
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Baccin_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (zhang_atlas %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' Xeno - Zhang')) +
+  coord_flip() 
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Zhang_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+write.xlsx(GOBP %>% as.data.frame(), file=paste0(PATH_GSEA_ORA, "MG63_xgraft_GSEA.xlsx"), sheetName="GOBP", row.names=FALSE)
+write.xlsx(Hall %>% as.data.frame(), file=paste0(PATH_GSEA_ORA, "MG63_xgraft_GSEA.xlsx"), sheetName="HALLMARK", append=TRUE, row.names=FALSE)
+```
+
+```{r}
+Hall_ora_up %>% as.data.frame()
+```
+CA2/PRRX1/SATB1/PTGS2/CPE/EPB41L3/GPRC5B/SERPINA3/MMP9/BMP2/RGS16/RELN/NAP1L2/ID2/SPP1/CCND2/MMP11/ACE/IL1B/TNFRSF1B	
+
+```{r}
+p = (Hall_ora_up %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.1, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +Count), y = Count, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('#E26565'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.1', '>0.1')) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Hallmark')) +
+  coord_flip()
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_ORA_UP_Hallmark_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (Hall %>% as.data.frame())[1:20,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Hallmark')) +
+  coord_flip()
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_UP_Hallmark_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+genes = str_split((Hall_ora_up %>% as.data.frame() %>% filter(ID == "HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION"))$geneID, pattern = '/')
+
+h = counts.mg63 %>% 
+  rownames_to_column('ID') %>%
+  separate(ID, into =  c('ENS', 'SYM'), sep = ":") %>%
+  filter(SYM %in% genes[[1]]) %>%
+  select(-ENS) %>%
+  column_to_rownames('SYM') 
+
+h = scale(t(h)) %>%
+    t()
+
+col_fun = colorRamp2(c(-2, 0, 2), c("steelblue", "beige", "firebrick"))
+
+h1 = Heatmap(h, 
+         col = col_fun,
+        name = 'z-score', 
+        width = ncol(h)*unit(5, "mm"), 
+        height = nrow(h)*unit(4, "mm"), 
+        show_column_names = F, 
+        show_row_dend = F, 
+        column_title = 'EMT',
+        bottom_annotation = HeatmapAnnotation(Cond = c(rep('EZHIP', 3), rep('WT', 2)), 
+                                               col = list(Cond = c('EZHIP' = "red", 'WT' = "blue"))))
+
+draw(h1)
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION.pdf"), width = 10, height = 10)
+draw(h1)
+dev.off()
+```
+
+```{r}
+Hall %>% as.data.frame()
+```
+
+
+```{r}
+p2 = gseaplot2(Hall,
+          geneSetID = c('KRAS_SIGNALING_UP', 'MYOGENESIS', 'EPITHELIAL_MESENCHYMAL_TRANSITION'), 
+          color = c('#337357', '#CD5334', '#FFB41F')) 
+p2
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_HALLMARK_GSEA_plot.pdf"), width = 7, height = 5)
+p2
+dev.off()
+```
+
+```{r}
+p = (GOBP_ora_up %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.005, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +Count), y = Count, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Hallmark')) +
+  coord_flip()
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_ORA_UP_GOBP_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+# U2OS Cell Line
+
+```{r, echo=TRUE}
+PATH = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/U2OS/out/01_raptor_exprtools/EZHIP_minus_C77_C2/"
+PATH_GSEA_ORA = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/U2OS/out/02_GSEA_ORA_minus_C77_C2//"
+COMP = "EZHIP_KOvsEZHIP"
+CELL = 'U2OS'
+```
+
+```{r}
+deg.u2os = read.csv(paste(PATH, "diff/Ensembl.ensGene.exon/", COMP, '.tsv', sep=""), sep="\t")
+counts.u2os= read.csv(paste(PATH, "counts/Ensembl.ensGene.exon.raw.tsv.gz", sep=""), sep="\t")
+```
+
+```{r}
+load(paste0(PATH_GSEA_ORA, CELL, '_', COMP, '.Rda'))
+```
+
+```{r}
+p = (dolgalev_atlas %>% as.data.frame())[1:14,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Dolgalev')) +
+  coord_flip() +
+  scale_y_continuous(expand = c(0, 0))
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Dolgalev_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (baryawno_atlas %>% as.data.frame())[1:15,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Baryawno')) +
+  coord_flip() +
+  scale_y_continuous(expand = c(0, 0))
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Baryawno_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (baccin_atlas %>% as.data.frame())[1:15,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Baccin')) +
+  coord_flip() +
+  scale_y_continuous(expand = c(0,  0))
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Baccin_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (zhang_atlas %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Zhang')) +
+  coord_flip() +
+  scale_y_continuous(expand = c(0,  0))
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Zhang_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+write.xlsx(GOBP %>% as.data.frame(), file=paste0(PATH_GSEA_ORA, "U2OS_cell_line_GSEA.xlsx"), sheetName="GOBP", row.names=FALSE)
+write.xlsx(Hall %>% as.data.frame(), file=paste0(PATH_GSEA_ORA, "U2OS_cell_line_GSEA.xlsx"), sheetName="HALLMARK", append=TRUE, row.names=FALSE)
+```
+
+```{r}
+Hall %>% as.data.frame()
+```
+
+
+```{r}
+p = (Hall_ora_up %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +Count), y = Count, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Hallmark')) +
+  coord_flip()
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_ORA_UP_Hallmark_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (Hall %>% as.data.frame())[1:20,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Hallmark')) +
+  coord_flip() +
+  scale_y_continuous(expand = c(0,0))
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Hallmark_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+
+```{r}
+genes = str_split((Hall_ora_up %>% as.data.frame() %>% filter(ID == "HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION"))$geneID, pattern = '/')
+
+h = cbind(counts.khos, counts.mg63) %>% 
+  rownames_to_column('ID') %>%
+  separate(ID, into =  c('ENS', 'SYM'), sep = ":") %>%
+  filter(SYM %in% genes[[1]]) %>%
+  select(-ENS) %>%
+  column_to_rownames('SYM') 
+
+h = scale(t(h)) %>%
+    t()
+
+col_fun = colorRamp2(c(-2, 0, 2), c("steelblue", "beige", "firebrick"))
+
+h1 = Heatmap(h, 
+         col = col_fun,
+        name = 'z-score', 
+        width = ncol(h)*unit(5, "mm"), 
+        height = nrow(h)*unit(4, "mm"), 
+        show_column_names = F, 
+        show_row_dend = F, 
+        column_title = 'EMT',
+        bottom_annotation = HeatmapAnnotation(Cond = c(rep('EZHIP', 3), rep('WT', 3), rep('EZHIP', 3), rep('WT', 2)), 
+                                              `Cell line` = c(rep('KHOS', 6), rep('MG63', 5)),
+                                               col = list(Cond = c('EZHIP' = "red", 'WT' = "blue"))))
+
+draw(h1)
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION.pdf"), width = 10, height = 10)
+draw(h1)
+dev.off()
+
+```
+
+```{r}
+p2 = gseaplot2(Hall,
+          geneSetID = c('KRAS_SIGNALING_UP', 'MYOGENESIS', 'EPITHELIAL_MESENCHYMAL_TRANSITION'), 
+          color = c('#337357', '#CD5334', '#FFB41F')) 
+p2
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_HALLMARK_GSEA_plot.pdf"), width = 7, height = 5)
+p2
+dev.off()
+```
+
+```{r}
+p = (GOBP_ora_up %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.005, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +Count), y = Count, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - GOBP')) +
+  coord_flip()
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_ORA_UP_GOBP_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+
+
+
+
+# hMSC Cell Line 
+
+```{r, echo=TRUE}
+PATH = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/hMSC/out/01_raptor_exprtools/EZHIP/"
+PATH_GSEA_ORA = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/hMSC/out/02_GSEA_ORA/"
+COMP = "WTvsEZHIP"
+CELL = 'hMSC'
+```
+
+```{r}
+deg.hMSC.cell = read.csv(paste(PATH, "diff/Ensembl.ensGene.exon/", COMP, '.tsv', sep=""), sep="\t")
+counts.hMSC.cell = read.csv(paste(PATH, "counts/Ensembl.ensGene.exon.raw.tsv.gz", sep=""), sep="\t")
+```
+
+```{r}
+load(paste0(PATH_GSEA_ORA, CELL, '_', COMP, '.Rda'))
+```
+
+```{r}
+p = (dolgalev_atlas %>% as.data.frame())[1:14,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Dolgalev')) +
+  coord_flip() 
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Dolgalev_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (baryawno_atlas %>% as.data.frame())[1:15,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Baryawno')) +
+  coord_flip() +
+  scale_y_continuous(expand = c(0, 0))
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Baryawno_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (baccin_atlas %>% as.data.frame())[1:15,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Baccin')) +
+  coord_flip() 
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Baccin_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (zhang_atlas %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Zhang')) +
+  coord_flip() 
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Zhang_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+write.xlsx(GOBP %>% as.data.frame(), file=paste0(PATH_GSEA_ORA, CELL, "_xgraft_GSEA.xlsx"), sheetName="GOBP", row.names=FALSE)
+write.xlsx(Hall %>% as.data.frame(), file=paste0(PATH_GSEA_ORA, CELL, "_xgraft_GSEA.xlsx"), sheetName="HALLMARK", append=TRUE, row.names=FALSE)
+```
+
+```{r}
+Hall %>% as.data.frame()
+```
+
+```{r}
+p = (Hall_ora_up %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +Count), y = Count, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Hallmark')) +
+  coord_flip()
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_ORA_UP_Hallmark_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (Hall %>% as.data.frame())[1:20,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Hallmark')) +
+  coord_flip() 
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Hallmark_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+```{r}
+GOBP %>% as.data.frame()
+```
+
+```{r}
+p = (GOBP_ora_up %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +Count), y = Count, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Hallmark')) +
+  coord_flip()
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_ORA_UP_Hallmark_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (GOBP %>% as.data.frame())[1:20,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Hallmark')) +
+  coord_flip() 
+
+p
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_GOBP_barplot.pdf"), width = 10, height = 5)
+p
+dev.off()
+```
+
+# MG63 Cell Line 
+
+```{r, echo=TRUE}
+PATH = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/MG63/out/01_raptor_exprtools/EZHIP/"
+PATH_GSEA_ORA = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/MG63/out/02_GSEA_ORA/"
+COMP = "WTvsEZHIP"
+CELL = 'MG63'
+```
+
+```{r}
+deg.mg63.cell = read.csv(paste(PATH, "diff/Ensembl.ensGene.exon/", COMP, '.tsv', sep=""), sep="\t")
+counts.mg63.cell = read.csv(paste(PATH, "counts/Ensembl.ensGene.exon.raw.tsv.gz", sep=""), sep="\t")
+```
+
+```{r}
+load(paste0(PATH_GSEA_ORA, CELL, '_', COMP, '.Rda'))
+```
+
+```{r}
+p = (dolgalev_atlas %>% as.data.frame())[1:14,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Dolgalev')) +
+  coord_flip() 
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Dolgalev_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+
+```{r}
+p = (baryawno_atlas %>% as.data.frame())[1:15,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Baryawno')) +
+  coord_flip() +
+  scale_y_continuous(expand = c(0, 0))
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Baryawno_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (baccin_atlas %>% as.data.frame())[1:15,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Baccin')) +
+  coord_flip() 
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Baccin_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (zhang_atlas %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Zhang')) +
+  coord_flip() 
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Zhang_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+write.xlsx(GOBP %>% as.data.frame(), file=paste0(PATH_GSEA_ORA, CELL, "_xgraft_GSEA.xlsx"), sheetName="GOBP", row.names=FALSE)
+write.xlsx(Hall %>% as.data.frame(), file=paste0(PATH_GSEA_ORA, CELL, "_xgraft_GSEA.xlsx"), sheetName="HALLMARK", append=TRUE, row.names=FALSE)
+```
+
+```{r}
+write.xlsx(GOBP %>% as.data.frame(), file=paste0(PATH_GSEA_ORA, CELL, "_xgraft_GSEA.xlsx"), sheetName="GOBP", row.names=FALSE)
+write.xlsx(Hall %>% as.data.frame(), file=paste0(PATH_GSEA_ORA, CELL, "_xgraft_GSEA.xlsx"), sheetName="HALLMARK", append=TRUE, row.names=FALSE)
+```
+
+```{r}
+Hall %>% as.data.frame()
+```
+
+
+```{r}
+p = (Hall_ora_up %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +Count), y = Count, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Hallmark')) +
+  coord_flip()
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_ORA_UP_Hallmark_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (Hall %>% as.data.frame())[1:20,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Hallmark')) +
+  coord_flip() 
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Hallmark_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+# KHOS Cell Line 
+
+```{r, echo=TRUE}
+PATH = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/KHOS/out/01_raptor_exprtools/EZHIP/"
+PATH_GSEA_ORA = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/KHOS/out/02_GSEA_ORA/"
+COMP = "WTvsEZHIP"
+CELL = 'KHOS'
+```
+
+```{r}
+deg.khos.cell = read.csv(paste(PATH, "diff/Ensembl.ensGene.exon/", COMP, '.tsv', sep=""), sep="\t")
+counts.khos.cell = read.csv(paste(PATH, "counts/Ensembl.ensGene.exon.raw.tsv.gz", sep=""), sep="\t")
+```
+
+```{r}
+load(paste0(PATH_GSEA_ORA, CELL, '_', COMP, '.Rda'))
+```
+
+```{r}
+p = (dolgalev_atlas %>% as.data.frame())[1:14,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Dolgalev')) +
+  coord_flip() 
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Dolgalev_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+
+```{r}
+p = (baryawno_atlas %>% as.data.frame())[1:15,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Baryawno')) +
+  coord_flip() 
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Baryawno_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (baccin_atlas %>% as.data.frame())[1:15,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Baccin')) +
+  coord_flip() 
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Baccin_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (zhang_atlas %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Zhang')) +
+  coord_flip() 
+  
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Zhang_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+write.xlsx(GOBP %>% as.data.frame(), file=paste0(PATH_GSEA_ORA, CELL, "_xgraft_GSEA.xlsx"), sheetName="GOBP", row.names=FALSE)
+write.xlsx(Hall %>% as.data.frame(), file=paste0(PATH_GSEA_ORA, CELL, "_xgraft_GSEA.xlsx"), sheetName="HALLMARK", append=TRUE, row.names=FALSE)
+```
+
+```{r}
+Hall %>% as.data.frame()
+```
+
+
+```{r}
+p = (Hall_ora_up %>% as.data.frame())[1:10,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +Count), y = Count, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Hallmark')) +
+  coord_flip()
+
+p
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_ORA_UP_Hallmark_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+```{r}
+p = (Hall %>% as.data.frame())[1:20,] %>% 
+  mutate(sign = ifelse(p.adjust < 0.05, 'p.adjust < 0.05', NA)) %>%
+  mutate(across('ID', str_replace_all, '_', ' '), 
+         across('ID', str_replace_all, 'HALLMARK', ' ')) %>%
+  ggplot(aes(x =  reorder(ID, +NES), y = NES, fill = sign)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('firebrick'), na.value = 'lightgrey', name = 'p-val', labels = c('<0.05', '>0.05')) +
+  theme_bw() +
+  theme(text = element_text(size = 15), 
+        axis.title.y = element_blank(),
+        axis.line = element_line(size = 0.5), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  ggtitle(paste0(CELL, ' - Hallmark')) +
+  coord_flip() 
+
+pdf(paste0(PATH_GSEA_ORA, CELL, '_', COMP, "_GSEA_Hallmark_barplot.pdf"), width = 7, height = 5)
+p
+dev.off()
+```
+
+
+

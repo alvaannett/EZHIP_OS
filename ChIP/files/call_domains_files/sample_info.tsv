@@ -1,0 +1,7 @@
+sample	IP	input	endedness
+U2OS_C1A	out/01A_genpipes_chipseq/alignment/U2OS_C1A/H3K27me3/U2OS_C1A.H3K27me3.sorted.dup.filtered.bam	out/01A_genpipes_chipseq/alignment/U2OS_C1A/Input/U2OS_C1A.Input.sorted.dup.filtered.bam	PE
+U2OS_C1B	out/01A_genpipes_chipseq/alignment/U2OS_C1B/H3K27me3/U2OS_C1B.H3K27me3.sorted.dup.filtered.bam	out/01A_genpipes_chipseq/alignment/U2OS_C1B/Input/U2OS_C1B.Input.sorted.dup.filtered.bam	PE
+U2OS_C1C	out/01A_genpipes_chipseq/alignment/U2OS_C1C/H3K27me3/U2OS_C1C.H3K27me3.sorted.dup.filtered.bam	out/01A_genpipes_chipseq/alignment/U2OS_C1C/Input/U2OS_C1C.Input.sorted.dup.filtered.bam	PE
+U2OS_C54A	out/01A_genpipes_chipseq/alignment/U2OS_C54A/H3K27me3/U2OS_C54A.H3K27me3.sorted.dup.filtered.bam	out/01A_genpipes_chipseq/alignment/U2OS_C54A/Input/U2OS_C54A.Input.sorted.dup.filtered.bam	PE
+U2OS_C54B	out/01A_genpipes_chipseq/alignment/U2OS_C54B/H3K27me3/U2OS_C54B.H3K27me3.sorted.dup.filtered.bam	out/01A_genpipes_chipseq/alignment/U2OS_C54B/Input/U2OS_C54B.Input.sorted.dup.filtered.bam	PE
+U2OS_C54C	out/01A_genpipes_chipseq/alignment/U2OS_C54C/H3K27me3/U2OS_C54C.H3K27me3.sorted.dup.filtered.bam	out/01A_genpipes_chipseq/alignment/U2OS_C54C/Input/U2OS_C54C.Input.sorted.dup.filtered.bam	PE

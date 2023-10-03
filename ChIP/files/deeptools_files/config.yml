@@ -1,0 +1,114 @@
+# list of sample names as used by genpipes: ["sample1", "sample2"]
+SAMPLES: ['U2OS_C54A', 'U2OS_C54B', 'U2OS_C54C', 'U2OS_C1A', 'U2OS_C1B', 'U2OS_C1C']
+
+# list marks as used by genpipes: ["H3K27me3", "H3K27ac"]
+MARKS: ['H3K27me3']
+
+# path to genpipes output folder
+GENPIPES: ["out/01_genpipes_chipseq"]
+
+# path to output folder
+OUT_PATH: "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/ChIP/U2OS/out/03_sndeeptools"
+
+CPU: 10
+CPU_COMPUTE_MATRIX: 10
+
+# path to black list file
+BLACK_LIST: "/lustre06/project/6004736/alvann/from_narval/REFERENCES/annotation_files/ENCODE.blacklist.wgEncodeHg19ConsensusSignalArtifactRegions.hg19.noOverlaps.bed"
+
+# bin size to use for bigwig summary
+BIN_SIZE: [5000]
+
+# bed files used for bigwig summary
+SUMMARY_REGIONS:
+  promoter5kb.ens.hg19: "/lustre06/project/6004736/alvann/from_narval/REFERENCES/annotation_files/hg19/Ensembl.ensGene.whole.hg19.collapsed.promoter5kb.bed"
+  cgi.3kb.UCSC.hg19: "/lustre06/project/6004736/alvann/from_narval/REFERENCES/annotation_files/hg19/cpgIslandExt.3kb.hg19.bed"
+  
+# PCs to compute
+PC:
+  pc12: [1, 2]
+
+# normalization method: RPKM, CPM etc (see deeptools for options)
+NORM_METHOD: ["CPM"]
+
+# scale factrs to use (numeric or rx)
+SCALE_FACTOR: [1]
+
+# if SCALE_FACTOR = "rx" provide path to csv file with rx scale factors for each sample
+# file needs to have column Sample and column rx
+SCALE_FACTOR_FILE_RX: ""
+
+# params to run compute matrix (used as input for heatmaps etc)
+COMPUT_MATRIX_PARAM:
+  cgi_H3K27me3_30000_new:
+    region_bed: "/lustre06/project/6004736/alvann/from_narval/REFERENCES/annotation_files/hg19/IGV.annotations.cpgIslands.hg19.bed"
+    ref_point: "center"
+    type: "ref_point"
+    length: ""
+    up: 30000
+    down: 30000
+    samples: ['U2OS_C54A.H3K27me3', 'U2OS_C54B.H3K27me3', 'U2OS_C54C.H3K27me3', 'U2OS_C1A.H3K27me3', 'U2OS_C1B.H3K27me3', 'U2OS_C1C.H3K27me3']
+  cgi_H3K27me3_10000_new_230801:
+    region_bed: "/lustre06/project/6004736/alvann/from_narval/REFERENCES/annotation_files/hg19/IGV.annotations.cpgIslands.hg19.bed"
+    ref_point: "center"
+    type: "ref_point"
+    length: ""
+    up: 10000
+    down: 10000
+    samples: ['U2OS_C54A.H3K27me3', 'U2OS_C54B.H3K27me3', 'U2OS_C54C.H3K27me3', 'U2OS_C1A.H3K27me3', 'U2OS_C1B.H3K27me3', 'U2OS_C1C.H3K27me3']
+  cgi_H3K27me3_10000_new_230731:
+    region_bed: "/lustre06/project/6004736/alvann/from_narval/REFERENCES/annotation_files/hg19/IGV.annotations.cpgIslands.hg19.bed"
+    ref_point: ""
+    type: "scale"
+    length: "1000"
+    up: 10000
+    down: 10000
+    samples: ['U2OS_C54A.H3K27me3', 'U2OS_C54B.H3K27me3', 'U2OS_C54C.H3K27me3', 'U2OS_C1A.H3K27me3', 'U2OS_C1B.H3K27me3', 'U2OS_C1C.H3K27me3']
+  
+# params plot heatmap and plot profile. See deeptols for options.
+PLOT_HEATMAP_PARAM:
+  cgi_H3K27me3_5000_new:
+    color: "#eeebd3,#eeebd3,#cc2200,#cc2200"
+    plotType: se 
+    lables: EZHIP-KO EZHIP-KO EZHIP-KO EZHIP EZHIP EZHIP
+    startLabel: 
+    endLabel: 
+    title: H3K27me3 wt peaks
+    k: 1
+    height: 10
+  cgi_H3K27me3_10000_new_230801:
+    color: "#eeebd3,#eeebd3,#cc2200,#cc2200"
+    plotType: se 
+    lables: EZHIP-KO EZHIP-KO EZHIP-KO EZHIP EZHIP EZHIP
+    startLabel: 
+    endLabel: 
+    title: H3K27me3 wt peaks
+    k: 1
+    height: 10
+    
+PLOT_PROFILE_PARAM:
+  cgi_H3K27me3_10000_new_230801:
+    lables: EZHIP-KO EZHIP-KO EZHIP-KO EZHIP EZHIP EZHIP
+    startLabel: 
+    endLabel: 
+    title: H3K27me3 CGI
+    plotType: se
+    colors: blue blue blue red red red
+  cgi_H3K27me3_10000_new_230727_v2:
+    lables: EZHIP-KO EZHIP-KO EZHIP-KO EZHIP EZHIP EZHIP
+    startLabel: 
+    endLabel: 
+    title: H3K27me3 CGI
+    plotType: lines
+    colors: blue blue blue red red red
+
+# samples used when calculating Z-score
+Z_SCORE_PARAM:
+  control: ['U2OS_C54A', 'U2OS_C54B', 'U2OS_C54C']
+  condition: 
+    EZHIP: ['U2OS_C1A', 'U2OS_C1B', 'U2OS_C1C']
+
+LOG2FC_PARAM:
+  control: ['U2OS_C54A', 'U2OS_C54B', 'U2OS_C54C']
+  condition: 
+    EZHIP: ['U2OS_C1A', 'U2OS_C1B', 'U2OS_C1C']

@@ -1,0 +1,644 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+```
+
+
+```{r}
+PATH_COUNTS = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/patient_clinical_seq/out/01_raptor_exprtools/EZHIP_negVsEZHIP_pos/counts/Ensembl.ensGene.exon.norm.tsv"
+PATH_META_PATIENT = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/files/patient_meta.tsv"
+SAMPELS = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/integrated/221106_oncoprint/files/samples.tsv"
+PATH_DEG = "/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/RNA/patient_clinical_seq/out/01_raptor_exprtools/EZHIP_negVsEZHIP_pos/diff/Ensembl.ensGene.exon/EZHIP_negvsEZHIP_pos.tsv"
+```
+
+```{r}
+counts = data.table::fread(PATH_COUNTS) 
+names(counts)[1] = "ID"
+```
+
+```{r}
+samples = data.table::fread(SAMPELS)
+meta = data.table::fread(PATH_META_PATIENT) %>% arrange(Patient_N) %>% filter(Patient_N %in% samples$Patient)
+deg = data.table::fread(PATH_DEG)
+```
+
+```{r}
+meta = meta %>% 
+  left_join(samples, by = c('Patient_N' = 'Patient')) %>% 
+  mutate(EZHIP_Status = ifelse(EZHIP_Status == 'positive', 'EZHIP', 'WT')) %>%
+  mutate(EZHIP_Status = factor(EZHIP_Status, c('WT', 'EZHIP')))
+```
+
+# EZHIP expression
+
+```{r}
+gene = "CXorf67"
+
+EZHIP = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta %>% select(Patient_N, EZHIP_Status), by = c('Patient' = 'Patient_N')) %>%
+  group_by(EZHIP_Status) %>%
+  na.omit() %>%
+  mutate(EZHIP_Status = ifelse(EZHIP_Status == 'WT', 'EZHIP-', 'EZHIP+')) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar(aes(x=EZHIP_Status, y=median, fill=EZHIP_Status), stat="identity", width = 0.5) +
+  geom_errorbar( aes(x=EZHIP_Status, ymin=median, ymax=median+sd), width=0.25, colour="black", size=1.3) +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_fill_manual(values = c('blue', 'red')) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title.x = element_blank(), 
+        legend.title = element_blank(), 
+        legend.position = 'none')  +
+  ylab('EZHIP')
+
+EZHIP
+
+pdf("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/integrated/221106_oncoprint/out/EZHIP_bar.pdf", width = 3,  height = 4)
+EZHIP
+dev.off()
+
+EZHIP = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta %>% select(Patient_N, EZHIP_Status), by = c('Patient' = 'Patient_N')) %>%
+  na.omit() %>%
+   mutate(EZHIP_Status = ifelse(EZHIP_Status == 'WT', 'EZHIP-', 'EZHIP+')) %>%
+  ggplot(aes(x=EZHIP_Status, y=value, fill=EZHIP_Status)) +
+  geom_boxplot(size = 1) +
+  scale_fill_manual(values = c('blue', 'red'), labels = c('EZHIP+', 'EZHIP-')) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title.x = element_blank(), 
+        legend.title = element_blank(), 
+        legend.position = 'none') +
+  ylab('EZHIP')
+
+pdf("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/integrated/221106_oncoprint/out/EZHIP_boxplot.pdf", width = 3, height = 4)
+EZHIP
+dev.off()
+```
+```{r}
+sex = meta %>%
+  count(Sex, EZHIP_Status) %>%
+  mutate(EZHIP_Status = ifelse(EZHIP_Status == 'WT', 'EZHIP-', 'EZHIP+')) %>%
+  ggplot(aes(x=Sex, y=n, fill=EZHIP_Status)) +
+  geom_bar(stat="identity", width = 0.6, position = position_dodge(width = 0.7)) +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_fill_manual(values = c('blue', 'red')) +
+   theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title.x = element_blank(), 
+        legend.title = element_blank()) 
+
+pdf("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/integrated/221106_oncoprint/out/sex_dist.pdf", width = 4, height = 3)
+sex
+dev.off()
+```
+
+
+# Other plots
+
+```{r}
+gene1 = 'CXorf67'
+gene2 = 'CCND[1-3]$'
+counts %>% 
+  filter(grepl(paste0(':', gene1, '$'), ID) | grepl(paste0(':', gene2), ID)) %>%
+  separate(ID, into = c(NA, 'ID'), sep = ':') %>%
+  column_to_rownames('ID') %>%
+  t() %>%
+  data.frame() %>%
+  pivot_longer(-CXorf67) %>%
+  ggplot(aes(log2(CXorf67+1), log2(value+1))) +
+  geom_point() +
+  facet_wrap(.~name, scales = 'free')
+
+gene2 = 'PAGE'
+counts %>% 
+  filter(grepl(paste0(':', gene1, '$'), ID) | grepl(paste0(':', gene2), ID)) %>%
+  separate(ID, into = c(NA, 'ID'), sep = ':') %>%
+  column_to_rownames('ID') %>%
+  t() %>%
+  data.frame() %>%
+  pivot_longer(-CXorf67) %>%
+  ggplot(aes(log2(CXorf67+1), log2(value+1))) +
+  geom_point() +
+  facet_wrap(.~name, scales = 'free')
+
+gene2 = 'XAGE'
+counts %>% 
+  filter(grepl(paste0(':', gene1, '$'), ID) | grepl(paste0(':', gene2), ID)) %>%
+  separate(ID, into = c(NA, 'ID'), sep = ':') %>%
+  column_to_rownames('ID') %>%
+  t() %>%
+  data.frame() %>%
+  pivot_longer(-CXorf67) %>%
+  ggplot(aes(log2(CXorf67+1), log2(value+1))) +
+  geom_point() +
+  facet_wrap(.~name, scales = 'free')
+
+gene2 = 'SSX'
+counts %>% 
+  filter(grepl(paste0(':', gene1, '$'), ID) | grepl(paste0(':', gene2), ID)) %>%
+  separate(ID, into = c(NA, 'ID'), sep = ':') %>%
+  column_to_rownames('ID') %>%
+  t() %>%
+  data.frame() %>%
+  pivot_longer(-CXorf67) %>%
+  ggplot(aes(log2(CXorf67+1), log2(value+1))) +
+  geom_point() +
+  facet_wrap(.~name, scales = 'free')
+
+
+```
+
+
+# PLOT GENES FROM ONCOPRINT
+
+```{r}
+gene = "CCND3"
+s = rownames(onco_mat %>% t() %>% as.data.frame() %>% filter(!is.na(CCND3)))
+
+CCND3 = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'Alt', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+```
+
+```{r}
+gene = "VEGFA"
+s = rownames(onco_mat %>% t() %>% as.data.frame() %>% filter(!is.na(VEGFA)))
+
+VEGFA = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'Alt', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 15),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+```
+
+
+```{r}
+gene = "KDM6A"
+s = rownames(onco_mat %>% t() %>% as.data.frame() %>% filter(!is.na(KDM6A)))
+
+KDM6A = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'Alt', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+```
+
+```{r}
+gene = "KDM6B"
+s = rownames(onco_mat %>% t() %>% as.data.frame() %>%  filter(!is.na(KDM6B)))
+
+
+KDM6B = counts %>% 
+  filter(grepl(gene, ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'Alt', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+```
+
+```{r}
+gene = "RUNX2"
+s = rownames(onco_mat %>% t() %>% as.data.frame() %>%  filter(!is.na(RUNX2)))
+
+
+
+RUNX2 = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'Alt', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+```
+
+```{r}
+gene = "RB1"
+s = rownames(onco_mat %>% t() %>% as.data.frame() %>%  filter(!is.na(RB1)))
+
+
+RB1 = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'Alt', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+```
+
+
+```{r}
+gene = "TP53"
+s = rownames(onco_mat %>% t() %>% as.data.frame() %>%  filter(!is.na(TP53)))
+
+ 
+
+TP53 = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'Alt', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+```
+
+```{r}
+gene = "ATRX"
+s = rownames(onco_mat %>% t() %>% as.data.frame() %>%  filter(!is.na(ATRX)))
+
+ATRX = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'Alt', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+```
+
+```{r}
+gene = "MYC"
+s = rownames(onco_mat %>% t() %>% as.data.frame() %>%  filter(!is.na(MYC)))
+
+MYC = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'Alt', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+```
+
+```{r}
+gene = "TERT"
+s = rownames(onco_mat %>% t() %>% as.data.frame() %>%  filter(!is.na(TERT)))
+
+TERT = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'Alt', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+```
+
+```{r}
+gene = "CXorf67"
+s = rownames(onco_mat %>% t() %>% as.data.frame() %>%  filter(!is.na(EZHIP)))
+
+EZHIP = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'EZHIP', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle('EZHIP') 
+
+gene = "CCND2"
+EZHIP_CCND2 = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'EZHIP', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+gene = "CCND3"
+EZHIP_CCND3 = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'EZHIP', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+gene = "RUNX2"
+EZHIP_RUNX2 = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'EZHIP', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+```
+
+```{r}
+gene = "EZH2"
+s = rownames(onco_mat %>% t() %>% as.data.frame() %>%  filter(grepl('cna', EZH2)))
+
+EZH2 = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'Alt', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+```
+
+```{r}
+gene = "CCND2"
+s = rownames(onco_mat %>% t() %>% as.data.frame() %>% filter(!is.na(RB1)))
+
+
+CCND2 = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'Alt', 'NA')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar(aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+```
+
+```{r}
+gene = "TP53I11"
+s = rownames(onco_mat %>% t() %>% as.data.frame() %>% filter(!is.na(TP53I11)))
+
+TP53I11 = counts %>% 
+  filter(grepl(paste0(':', gene, '$'), ID)) %>% 
+  pivot_longer(-ID) %>% 
+  left_join(samples %>% select(Patient, RNA), by = c('name' = 'RNA')) %>% 
+  left_join(meta, by = c('Patient' = 'Patient_N')) %>%
+  mutate(alter = ifelse(Patient %in% c(s), 'Alt', 'WT')) %>%
+  group_by(alter) %>%
+  summarise(median = median(value), sd = sd(value)) %>%
+  ggplot() +
+  geom_bar( aes(x=alter, y=median), stat="identity", fill="steelblue", alpha=0.7, width = 0.5) +
+  geom_errorbar( aes(x=alter, ymin=ifelse(median-sd < 0, 0, median-sd), ymax=median+sd), width=0.25, colour="black", size=1.3) +
+   theme_bw() +
+  theme(text = element_text(size = 18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(), 
+        axis.title = element_blank(), 
+        legend.title = element_blank()) +
+  ggtitle(gene) 
+
+```
+
+
+```{r}
+pdf("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/integrated/221106_oncoprint/out/expression_oncoprint.pdf", width = 10)
+cowplot::plot_grid(EZH2, KDM6A, ATRX, TP53, MYC, RB1, CCND2, CCND3, RUNX2, TP53I11, TERT, VEGFA)
+cowplot::plot_grid(EZHIP, EZHIP_CCND2, EZHIP_CCND3, EZHIP_RUNX2)
+dev.off()
+
+pdf("/lustre06/project/6004736/alvann/from_narval/220318_EZHIP/integrated/221106_oncoprint/out/expression_oncoprint_report.pdf", height = 4, width = 8)
+cowplot::plot_grid(EZHIP, cowplot::plot_grid(CCND3, RUNX2, VEGFA, MYC), rel_widths = c(0.5, 1))
+dev.off()
+```
+
+
